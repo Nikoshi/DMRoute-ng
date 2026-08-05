@@ -102,7 +102,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry) : B
         logger.LogInformation("<-- RPTK von ID {RepeaterId}", repeaterId);
 
         // Zero-Allocation Hash-Berechnung auf dem Stack
-        int pskLength = Encoding.ASCII.GetByteCount(repeater.PreSharedKey);
+        var pskLength = Encoding.ASCII.GetByteCount(repeater.PreSharedKey);
         Span<byte> dataToHash = stackalloc byte[4 + pskLength];
         
         BinaryPrimitives.WriteUInt32BigEndian(dataToHash[..4], repeater.RandomNumber);
