@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{B7448320-08D6-4C1C-81BB-B0D9AB6E6D67}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DMRoute-ng", "src\DMRoute_ng\DMRoute-ng.csproj", "{A9BA9052-3BE2-4686-9FAC-E7903C95C46F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{DEC7601B-F134-42C2-A5E7-18BDCE80BFC3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DMRoute_ng.Tests", "tests\DMRoute_ng.Tests\DMRoute_ng.Tests.csproj", "{B5809292-F561-4CDE-A826-76B421740E48}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A9BA9052-3BE2-4686-9FAC-E7903C95C46F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A9BA9052-3BE2-4686-9FAC-E7903C95C46F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A9BA9052-3BE2-4686-9FAC-E7903C95C46F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A9BA9052-3BE2-4686-9FAC-E7903C95C46F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5809292-F561-4CDE-A826-76B421740E48}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5809292-F561-4CDE-A826-76B421740E48}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5809292-F561-4CDE-A826-76B421740E48}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5809292-F561-4CDE-A826-76B421740E48}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A9BA9052-3BE2-4686-9FAC-E7903C95C46F} = {B7448320-08D6-4C1C-81BB-B0D9AB6E6D67}
+		{B5809292-F561-4CDE-A826-76B421740E48} = {DEC7601B-F134-42C2-A5E7-18BDCE80BFC3}
+	EndGlobalSection
+EndGlobal

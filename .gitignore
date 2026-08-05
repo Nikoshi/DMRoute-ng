@@ -1,3 +1,9 @@
 /obj
 /bin
 
+/src/DMRoute_ng/obj
+/src/DMRoute_ng/bin
+
+/tests/DMRoute_ng.Tests/obj
+/tests/DMRoute_ng.Tests/bin
+/tests/DMRoute_ng.Tests/TestResults
