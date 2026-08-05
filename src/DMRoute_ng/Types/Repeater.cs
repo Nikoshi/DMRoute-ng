@@ -34,4 +34,23 @@ public sealed class Repeater(int id, string psk, RepeaterState state, RepeaterCo
     public uint RandomNumber { get; set; }
     public DateTime? LastPing { get; set; }
     public IPEndPoint? EndPoint { get; set; }
+    
+    // Füge dies in die Klasse Repeater ein
+    private volatile int[] _talkgroups = [];
+    
+     
+    // Thread-sicheres Hinzufügen (Copy-On-Write) - wird bei PTT aufgerufen
+    public void AddTalkgroup(int tg)
+    {
+        var current = _talkgroups;
+        if (Array.IndexOf(current, tg) != -1) return;
+        
+        var newTgs = new int[current.Length + 1];
+        Array.Copy(current, newTgs, current.Length);
+        newTgs[current.Length] = tg;
+        _talkgroups = newTgs; // Atomarer Pointer-Swap
+    }
+    
+    // Für den Hot-Path: Zero-Allocation Lesezugriff
+    public ReadOnlySpan<int> GetTalkgroups() => _talkgroups;
 }

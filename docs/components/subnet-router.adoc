@@ -1,0 +1,24 @@
+= MicroSubnetRouter
+:toc:
+:sectnums:
+
+== Übersicht
+Der `MicroSubnetRouter` ist für das zustandslose Routing von DMR-Paketen (DMRD) auf Basis von Subnetzen zuständig. Er ersetzt klassische, speicherintensive Talkgroup-Subscriptions durch eine mathematische Segmentierung.
+
+== Subnetz-Berechnung & Haushalts-Bestimmung
+Die Zuordnung eines Funkgeräts oder Repeaters zu einem spezifischen Subnetz (Haushalt) erfolgt durch eine einfache Ganzzahldivision der DMR-ID:
+
+[source,csharp]
+----
+int householdId = dmrId / 100;
+----
+
+Pakete, die an eine bestimmte Ziel-ID (`dstId`) adressiert sind, werden ausschließlich an Repeater weitergeleitet, deren eigene ID in dasselbe Subnetz fällt (`peer.Id / 100 == targetHouseholdId`).
+
+== Komplexität und Roaming-Mapping
+Durch den Verzicht auf dynamische Listen-Lookups für Abonnements skaliert das Routing-Verfahren extrem effizient.
+Die mathematische Zuordnung eines Ziels zu einem Haushalt erfolgt in konstanter Zeit ($O(1)$).
+
+Das anschließende Filtern der aktiven Repeater-Liste (via Zero-Allocation `ReadOnlySpan`) erfolgt linear zur Anzahl der eingeloggten Repeater im Netzwerk ($O(N)$), wobei der Matching-Vergleich pro Repeater wiederum in $O(1)$ erfolgt.
+
+Dies ermöglicht ein nahtloses Roaming: Sobald sich ein Repeater in einem Subnetz anmeldet, empfängt er automatisch den Traffic seines Haushalts, ohne dass serverseitig explizite Routing-Tabellen aktualisiert werden müssen.

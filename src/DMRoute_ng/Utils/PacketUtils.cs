@@ -4,16 +4,21 @@ namespace DMRoute_ng.Utils;
 
 public static class PacketUtils
 {
-    // Eingehende Header (zum schnellen Span-Vergleich)
     public static ReadOnlySpan<byte> RptlHeader => "RPTL"u8;
     public static ReadOnlySpan<byte> RptkHeader => "RPTK"u8;
     public static ReadOnlySpan<byte> RptPingHeader => "RPTPING"u8;
     public static ReadOnlySpan<byte> DmrdHeader => "DMRD"u8;
     public static ReadOnlySpan<byte> RptcHeader => "RPTC"u8;
-
-    // --- Master Responses ---
-
-    // Master Challenge (Antwort auf RPTL)
+    
+    // Master Challenge (Antwort auf RPTL) im korrekten RPTACK-Format
+    public static byte[] BuildRptAck(uint salt)
+    {
+        var packet = new byte[10]; // 6 Bytes "RPTACK" + 4 Bytes Salt
+        "RPTACK"u8.CopyTo(packet.AsSpan(0, 6));
+        BinaryPrimitives.WriteUInt32BigEndian(packet.AsSpan(6, 4), salt);
+        return packet;
+    }
+    
     public static byte[] BuildMstc(int repeaterId, uint salt)
     {
         var packet = new byte[12];
