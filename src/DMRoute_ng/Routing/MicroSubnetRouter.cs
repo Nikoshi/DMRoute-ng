@@ -1,75 +1,112 @@
+using System;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using DMRoute_ng.Core;
 using DMRoute_ng.Registry;
 using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Routing;
 
-public class MicroSubnetRouter(ILogger<MicroSubnetRouter> logger, RepeaterRegistry registry)
+public class MicroSubnetRouter
 {
-    private const int GlobalTalkgroup = 1;
-    private const int LocalZoneTalkgroup = 10;
+    private readonly ILogger<MicroSubnetRouter> _logger;
+    private readonly RepeaterRegistry _registry;
+    
+    // Die feste Basis-Zone, für die dieser Master zuständig ist (z.B. 100)
+    private readonly int _masterZoneId;
+
+    // Lokales Status-Tracking (DMR-ID des Geräts → ID des lokalen Repeaters/Hotspots)
+    private readonly ConcurrentDictionary<int, int> _localDeviceRouting = new();
+
+    // Event für Phase 2 (SdsGateway)
+    public event Action<byte[], string>? OnDataFrameReceived;
+
+    public MicroSubnetRouter(ILogger<MicroSubnetRouter> logger, RepeaterRegistry registry, int masterZoneId)
+    {
+        _logger = logger;
+        _registry = registry;
+        _masterZoneId = masterZoneId;
+    }
 
     public void RouteDmrd(ReadOnlySpan<byte> packet, IDmrSender sender)
     {
         if (packet.Length < 23) return; 
 
+        // 1. IDs aus dem Homebrew-Header extrahieren
+        var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(packet.Slice(11, 4));
         
-        // Call-Typ aus den Bits extrahieren (Byte 15)
+        // 2. Flags aus Byte 15 auslesen
         var bits = packet[15];
-        var isUnitCall = (bits & 0x40) != 0; // Einzelruf (Private Call)
+        var isUnitCall = (bits & 0x40) != 0; 
         var isGroupCall = !isUnitCall;
+
+        // TODO Phase 2: Frame-Typ (Voice vs. Data) exakt auslesen. 
+        // Für den Moment behandeln wir alles als Voice.
+        var isDataFrame = (packet[15] & 0x20) != 0; 
         
-        if (!registry.TryGet(repeaterId, out var sourceRepeater) || sourceRepeater == null) return;
+        if (!_registry.TryGet(repeaterId, out var sourceRepeater) || sourceRepeater == null) return;
 
-        var senderZoneId = repeaterId / 100;
-        var targetZoneId = -1;
-        var isGlobal = false;
+        // 3. Status-Tracking: Welches Gerät sendet gerade über welchen Hotspot?
+        _localDeviceRouting[srcId] = repeaterId;
 
-        if (isUnitCall)
+        // 4. SdsGateway-Abfang (Phase 2)
+        if (isDataFrame)
         {
-            // Private Call: Ziel-ID ist ein Gerät (z.B. 10025 -> Zone 100)
-            targetZoneId = dstId / 100;
-        }
-        else if (isGroupCall)
-        {
-            switch (dstId)
-            {
-                case GlobalTalkgroup:
-                    isGlobal = true; // Geht an alle
-                    break;
-                case LocalZoneTalkgroup:
-                    targetZoneId = senderZoneId; // Lokale Zone
-                    break;
-                default:
-                    targetZoneId = dstId; // Explizite Fremdzone (z.B. TG 100)
-                    break;
-            }
+            _logger.LogDebug("Data-Frame von {SrcId} empfangen. Geht ans SdsGateway...", srcId);
+            OnDataFrameReceived?.Invoke([.. packet], sourceRepeater.EndPoint!.ToString());
         }
 
-        logger.LogDebug("Received {CallType} from {Repeater} to {DstId} ({TargetZone})", isUnitCall ? "Private Call": "Group Call",  repeaterId, dstId, targetZoneId);
-        
+        // 5. Voice-Routing (Phase 1)
         var routeCount = 0;
 
-        foreach (var peer in registry.GetActivePeers())
+        if (isGroupCall)
         {
-            if (peer.Id == repeaterId) continue;
-
-            var peerZoneId = peer.Id / 100;
-
-            if (isGlobal || peerZoneId == targetZoneId)
+            // Lokales Group-Routing: An alle Hotspots in unserer Zone senden (außer zum Absender)
+            foreach (var peer in _registry.GetActivePeers())
             {
+                if (peer.Id == repeaterId) continue;
+                
                 sender.SendTo(packet, peer.EndPoint!);
                 routeCount++;
+            }
+        }
+        else if (isUnitCall)
+        {
+            // Subnetting: Gehört das Ziel zu unserer Zone?
+            var targetZoneId = dstId / 100;
+
+            if (targetZoneId == _masterZoneId)
+            {
+                // --- LOKALER PRIVATE CALL ---
+                if (_localDeviceRouting.TryGetValue(dstId, out var targetRepeaterId))
+                {
+                    if (_registry.TryGet(targetRepeaterId, out var targetRepeater) && targetRepeater != null)
+                    {
+                        // Gezielter Unicast an exakt den Hotspot, wo das Gerät zuletzt war
+                        sender.SendTo(packet, targetRepeater.EndPoint!);
+                        routeCount++;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Lokales Ziel {DstId} unbekannt. Das Gerät hat sich noch nicht gemeldet", dstId);
+                    // Optional: Später könnte man hier ein Paging (Broadcast) senden, um das Gerät zu wecken.
+                }
+            }
+            else
+            {
+                // --- FREMD-ZONE ---
+                _logger.LogDebug("Ziel {DstId} gehört zu Fremd-Zone {TargetZone}. Paket wird (noch) verworfen", dstId, targetZoneId);
+                // Hier greift in Phase 4 die M2M-Tabelle: Unicast an die WireGuard-IP des anderen Masters.
             }
         }
 
         if (routeCount > 0)
         {
-            logger.LogDebug("--> DMRD geroutet (Group: {IsGroup}, Global: {IsGlobal}, TargetZone: {Zone}, Count: {Count})", 
-                isGroupCall, isGlobal, targetZoneId, routeCount);
+            _logger.LogDebug("--> {Type} von {SrcId} an {DstId} geroutet (Ziele: {Count})", 
+                isUnitCall ? "PrivateCall" : "GroupCall", srcId, dstId, routeCount);
         }
     }
 }

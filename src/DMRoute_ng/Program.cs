@@ -1,4 +1,5 @@
 ﻿using DMRoute_ng.Core;
+using DMRoute_ng.Gateways;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using DMRoute_ng.Registry;
@@ -37,10 +38,23 @@ builder.Services.AddSingleton<RepeaterRegistry>(sp =>
     return registry;
 });
 
-builder.Services.AddSingleton<MicroSubnetRouter>();
+const int myZoneId = 100;
+builder.Services.AddSingleton(sp => 
+    new MicroSubnetRouter(
+        sp.GetRequiredService<ILogger<MicroSubnetRouter>>(), 
+        sp.GetRequiredService<RepeaterRegistry>(), 
+        myZoneId
+    )
+);
 
 // UDP-Server starten
 builder.Services.AddHostedService<DmrServer>();
 
+builder.Services.AddSingleton<SdsGateway>();
+
 var host = builder.Build();
+
+// Erzwingt die Instanziierung des Gateways beim Start, damit das Event abonniert wird
+host.Services.GetRequiredService<SdsGateway>();
+
 host.Run();
