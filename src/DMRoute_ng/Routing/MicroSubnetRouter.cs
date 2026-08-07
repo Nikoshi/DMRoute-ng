@@ -1,4 +1,3 @@
-using System;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using DMRoute_ng.Core;
@@ -28,6 +27,7 @@ public class MicroSubnetRouter
         _masterZoneId = masterZoneId;
     }
 
+    // ReSharper disable once CognitiveComplexity
     public void RouteDmrd(ReadOnlySpan<byte> packet, IDmrSender sender)
     {
         if (packet.Length < 23) return; 
@@ -42,8 +42,7 @@ public class MicroSubnetRouter
         var isUnitCall = (bits & 0x40) != 0; 
         var isGroupCall = !isUnitCall;
 
-        // TODO Phase 2: Frame-Typ (Voice vs. Data) exakt auslesen. 
-        // Für den Moment behandeln wir alles als Voice.
+        // Frame-Typ (Voice vs. Data) exakt auslesen.
         var isDataFrame = (packet[15] & 0x20) != 0; 
         
         if (!_registry.TryGet(repeaterId, out var sourceRepeater) || sourceRepeater == null) return;

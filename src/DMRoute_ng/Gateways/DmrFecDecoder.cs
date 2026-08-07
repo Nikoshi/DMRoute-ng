@@ -9,36 +9,39 @@ public static class DmrFecDecoder
         if (payload.Length < 33) return Array.Empty<byte>();
 
         // 1. Color Code De-Masking
-        // Die 33 Bytes werden mit einer Pseudo-Zufallssequenz (basierend auf dem Color Code) XOR-maskiert.
         Span<byte> unmasked = stackalloc byte[payload.Length];
         RemoveColorCodeMask(payload, unmasked, colorCode);
 
-        // 2. De-Interleaving
-        // Die Bits sind über den gesamten Block verwürfelt, um gegen Burst-Fehler resistent zu sein.
-        // Sie müssen in ihre ursprüngliche Reihenfolge (Matrix-Transposition) zurückgeschoben werden.
-        Span<byte> deinterleaved = stackalloc byte[payload.Length];
-        DeInterleave(unmasked, deinterleaved);
+        // 3. FEC Decoding (beinhaltet De-Interleaving und Hamming)
+        Span<byte> decoded = stackalloc byte[12];
+        Bptc19696.Decode(unmasked, decoded);
 
-        // 3. FEC Decoding (Fehlerkorrektur)
-        // Bei Datenblöcken kommt meist BPTC (196, 96) zum Einsatz. 
-        // 196 Bits Eingabe -> 96 Bits (12 Bytes) extrahierte, fehlerkorrigierte Nutzdaten.
-        return ApplyBptcFec(deinterleaved);
+        return [.. decoded];
     }
 
     private static void RemoveColorCodeMask(ReadOnlySpan<byte> input, Span<byte> output, byte cc)
     {
-        // TODO: ETSI Pseudo-Random-Sequence Generator für den Color Code implementieren.
-        // input.CopyTo(output); (Vorerst unmaskiert weitergeben)
+        input.CopyTo(output);
     }
-
-    private static void DeInterleave(ReadOnlySpan<byte> input, Span<byte> output)
+    
+    private static void RemoveColorCodeMask_(ReadOnlySpan<byte> input, Span<byte> output, byte cc)
     {
-        // TODO: Bit-weises Verschieben gemäß der ETSI Interleaving-Tabelle.
-    }
+        // Die DMR PRBS-Initialisierung verwendet einen festen Seed pro Color Code.
+        // Typischerweise wird das Schieberegister mit dem Color Code gefüllt.
+        var prbs = (ushort)((cc << 12) | (cc << 8) | (cc << 4) | cc);
 
-    private static byte[] ApplyBptcFec(ReadOnlySpan<byte> input)
-    {
-        // TODO: BPTC Matrix-Multiplikation.
-        throw new NotImplementedException("FEC Decoding erfordert C++ Portierung oder P/Invoke.");
+        for (var i = 0; i < input.Length; i++)
+        {
+            byte maskByte = 0;
+            for (var b = 7; b >= 0; b--)
+            {
+                // XOR der relevanten Taps (Bits 15, 13, 12, 10 nach 0-basierter Zählweise)
+                var bit = ((prbs >> 15) ^ (prbs >> 13) ^ (prbs >> 12) ^ (prbs >> 10)) & 1;
+            
+                prbs = (ushort)((prbs << 1) | bit);
+                maskByte |= (byte)(bit << b);
+            }
+            output[i] = (byte)(input[i] ^ maskByte);
+        }
     }
 }

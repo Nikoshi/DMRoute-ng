@@ -1,5 +1,3 @@
-using System;
-
 namespace DMRoute_ng.Gateways;
 
 public static class Bptc19696
@@ -39,6 +37,7 @@ public static class Bptc19696
         }
     }
 
+    // ReSharper disable once CognitiveComplexity
     private static void DecodeErrorCheck(Span<bool> deInterData)
     {
         bool fixing;
