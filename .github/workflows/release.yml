@@ -63,10 +63,21 @@ jobs:
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: release-${{ steps.vars.outputs.sha_short }}
-          name: Release ${{ steps.vars.outputs.sha_short }}
+          tag_name: ci-release-${{ steps.vars.outputs.sha_short }}
+          name: CI Release ${{ steps.vars.outputs.sha_short }}
           draft: false
           prerelease: false
           files: ./publish/${{ matrix.artifact_name }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete older releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 5
+          delete_tags: true
+          # Löscht NUR Tags, die exakt mit "ci-release-" starten (z.B. ci-release-dea3faf)
+          delete_tags_pattern: '^ci-release-.*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
