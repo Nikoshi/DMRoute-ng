@@ -23,7 +23,7 @@ public class SdsGateway
     // ReSharper disable once CognitiveComplexity
     private void HandleDataFrame(byte[] packet, string sourceEndpoint)
     {
-        if (packet.Length < 55) return;
+        if (packet.Length < 53) return;
 
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var dataType = (byte)(packet[15] & 0x0F);
