@@ -72,7 +72,7 @@ jobs:
           dotnet-version: '11.x'
 
       - name: Publish Highly Optimized Binary
-        # Nutzt die Variablen aus der Matrix für den jeweiligen Runner
+        shell: bash
         run: |
           dotnet publish src/DMRoute_ng/DMRoute-ng.csproj \
             --configuration Release \
