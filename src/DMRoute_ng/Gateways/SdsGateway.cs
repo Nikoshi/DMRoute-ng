@@ -1,7 +1,6 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Text;
+using DMRoute_ng.Coding;
 using Microsoft.Extensions.Logging;
 using DMRoute_ng.Routing;
 
@@ -21,59 +20,91 @@ public class SdsGateway
         router.OnDataFrameReceived += HandleDataFrame;
     }
 
+    // ReSharper disable once CognitiveComplexity
     private void HandleDataFrame(byte[] packet, string sourceEndpoint)
     {
         if (packet.Length < 55) return;
 
-        int srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
-        byte dataType = (byte)(packet[15] & 0x0F);
+        var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
+        var dataType = (byte)(packet[15] & 0x0F);
         var payload = packet.AsSpan(20, 33);
 
-        if (dataType == 0x06) // DT_DATA_HEADER
+        if (dataType == 0x06) 
         {
             Span<byte> decodedHeader = stackalloc byte[12];
             Bptc19696.Decode(payload, decodedHeader);
 
-            // Anzahl der Datenblöcke aus Byte 8 extrahieren (untere 7 Bits)
-            int expectedBlocks = decodedHeader[8] & 0x7F;
+            var expectedBlocks = decodedHeader[8] & 0x7F;
+            _logger.LogInformation("DATA HEADER (Confirmed) von {SrcId}. Erwartete Blöcke: {Blocks}. HEX: {Hex}", 
+                srcId, expectedBlocks, BitConverter.ToString([.. decodedHeader]));
 
-            // Puffer für diese Übertragung initialisieren
-            _messageBuffers[srcId] = (expectedBlocks, new List<byte>());
+            _messageBuffers[srcId] = (expectedBlocks, []);
         }
-        else if (dataType == 0x07 || dataType == 0x08) // DT_RATE_12_DATA oder DT_RATE_34_DATA
+        else if (dataType == 0x07 || dataType == 0x08) 
         {
             if (!_messageBuffers.TryGetValue(srcId, out var session)) return;
 
-            byte[] decodedBlock = DmrFecDecoder.Decode(payload, FallbackColorCode);
-            
+            byte[] decodedBlock;
+            int blockSize;
+
+            if (dataType == 0x07)
+            {
+                decodedBlock = DmrFecDecoder.Decode(payload, FallbackColorCode);
+                blockSize = 12;
+            }
+            else // 0x08 - Trellis Rate 3/4
+            {
+                decodedBlock = new byte[18];
+                if (!DmrTrellis.Decode(payload, decodedBlock))
+                {
+                    _logger.LogWarning("Trellis Fehlerkorrektur für Block von {SrcId} fehlgeschlagen", srcId);
+                    return;
+                }
+                blockSize = 18;
+            }
+        
             lock (session.Buffer)
             {
                 session.Buffer.AddRange(decodedBlock);
+                _logger.LogInformation("DATA BLOCK (Type {Type:X2}) von {SrcId}. Aktueller Buffer: {Count} Bytes. HEX: {Hex}", 
+                    dataType, srcId, session.Buffer.Count, BitConverter.ToString(session.Buffer.ToArray()));
 
-                // Prüfen, ob alle Blöcke empfangen wurden (12 Bytes pro Block)
-                if (session.Buffer.Count >= session.ExpectedBlocks * 12)
+                if (session.Buffer.Count >= session.ExpectedBlocks * blockSize)
                 {
-                    byte[] fullMessage = session.Buffer.ToArray();
+                    _logger.LogInformation("Alle Blöcke empfangen. Starte Dekodierung...");
                     
-                    // Offset: 20 Bytes IPv4 + 8 Bytes UDP + 10 Bytes TMS-Header = 38 Bytes
-                    if (fullMessage.Length > 38)
+                    var fullMessage = session.Buffer.ToArray();
+                    var ipOffset = -1;
+
+                    // Suche den Start des IPv4-Headers in den ersten Bytes
+                    for (var i = 0; i < 4; i++)
                     {
-                        // 4 Bytes CRC/Füllbytes am Ende ignorieren
-                        int textLength = fullMessage.Length - 38 - 4; 
+                        if (fullMessage[i] != 0x45 || fullMessage[i + 1] != 0x00) continue;
+                        ipOffset = i;
+                        break;
+                    }
+
+                    if (ipOffset >= 0)
+                    {
+                        // Type 07: TMS-Header endet 38 Bytes nach IP-Start
+                        // Type 08: TMS-Header endet 42 Bytes nach IP-Start
+                        var textOffset = ipOffset + (dataType == 0x07 ? 38 : 42); 
+                        
+                        // Verbleibende Länge abzüglich 4 Bytes CRC/Füllbytes am Ende
+                        var textLength = fullMessage.Length - textOffset - 4; 
                         
                         if (textLength > 0)
                         {
-                            // UTF-16 Little Endian decodieren
-                            string text = Encoding.Unicode.GetString(fullMessage, 38, textLength);
+                            var text = Encoding.Unicode.GetString(fullMessage, textOffset, textLength).TrimEnd('\0');
                             
-                            // Null-Terminierung am Ende entfernen, falls vorhanden
-                            text = text.TrimEnd('\0');
-                            
-                            _logger.LogInformation("Nachricht von {SrcId} empfangen: {Text}", srcId, text);
+                            // Verhindert leere Ausgaben bei reinen Delivery-ACKs
+                            if (!string.IsNullOrWhiteSpace(text)) 
+                            {
+                                _logger.LogInformation("SMS von {SrcId}: {Text}", srcId, text);
+                            }
                         }
                     }
 
-                    // Puffer nach erfolgreicher Dekodierung leeren
                     _messageBuffers.TryRemove(srcId, out _);
                 }
             }

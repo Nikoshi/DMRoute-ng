@@ -1,5 +1,5 @@
 // ReSharper disable InconsistentNaming
-namespace DMRoute_ng.Gateways;
+namespace DMRoute_ng.Coding;
 
 public static class Golay2087
 {
