@@ -1,4 +1,4 @@
-name: .NET Core Test & Coverage
+name: .NET Core Test & Release
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,3 +39,41 @@ jobs:
         with:
           name: coverage-report
           path: coveragereport
+
+  release:
+    # Triggert nur bei Pushes auf main/master, nicht bei Pull Requests
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 11
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.x'
+
+      - name: Publish Highly Optimized Binary
+        # --runtime linux-x64 erzwingt eine native, eigenständige ausführbare Datei
+        run: |
+          dotnet publish src/DMRoute_ng/DMRoute-ng.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            -p:PublishAot=true \
+            -p:OptimizationPreference=Speed \
+            -p:IlcGenerateMsvcBindOptions=true \
+            --output ./publish
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release-${{ github.sha }}
+          name: Release ${{ github.sha }}
+          draft: false
+          prerelease: false
+          files: ./publish/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
