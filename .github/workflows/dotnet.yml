@@ -41,11 +41,27 @@ jobs:
           path: coveragereport
 
   release:
-    # Triggert nur bei Pushes auf main/master, nicht bei Pull Requests
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     needs: build-and-test
-    runs-on: ubuntu-latest
-    
+
+    # Hier definieren wir die Matrix für beide Betriebssysteme
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            runtime: linux-x64
+            artifact_name: DMRoute-ng-linux-x64
+          - os: windows-latest
+            runtime: win-x64
+            artifact_name: DMRoute-ng-win-x64
+
+    runs-on: ${{ matrix.os }}
+
+    # Behebt den 403-Fehler: Erlaubt das Schreiben von Releases und Paketen
+    permissions:
+      contents: write
+      packages: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,24 +72,27 @@ jobs:
           dotnet-version: '11.x'
 
       - name: Publish Highly Optimized Binary
-        # --runtime linux-x64 erzwingt eine native, eigenständige ausführbare Datei
+        # Nutzt die Variablen aus der Matrix für den jeweiligen Runner
         run: |
           dotnet publish src/DMRoute_ng/DMRoute-ng.csproj \
             --configuration Release \
-            --runtime linux-x64 \
+            --runtime ${{ matrix.runtime }} \
             --self-contained true \
             -p:PublishAot=true \
             -p:OptimizationPreference=Speed \
             -p:IlcGenerateMsvcBindOptions=true \
-            --output ./publish
+            --output ./publish/${{ matrix.artifact_name }}
 
-      - name: Create GitHub Release
+      # Da Windows und Linux parallel laufen, nutzen wir "contents: write", 
+      # damit beide Runner ihre Datei sicher in dasselbe Release hochladen können.
+      # softprops/action-gh-release unterstützt das parallele Hochladen automatisch.
+      - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release-${{ github.sha }}
           name: Release ${{ github.sha }}
           draft: false
           prerelease: false
-          files: ./publish/*
+          files: ./publish/${{ matrix.artifact_name }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
