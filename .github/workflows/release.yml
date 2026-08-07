@@ -1,49 +1,19 @@
-name: .NET Core Test & Release
+name: .NET Core Native Release
 
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+  workflow_run:
+    workflows: [ ".NET Core Test & Coverage" ] # Muss exakt dem 'name' der ersten Datei entsprechen
+    types:
+      - completed
+    branches:
+      - main
+      - master
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 11
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '11.x'
-
-      - name: Restore dependencies
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
-
-      - name: Test and Collect Coverage
-        run: dotnet test --no-build --configuration Release --collect:"XPlat Code Coverage"
-
-      - name: Generate HTML Report
-        uses: danielpalme/ReportGenerator-GitHub-Action@5
-        with:
-          reports: 'tests/DMRoute_ng.Tests/TestResults/**/coverage.cobertura.xml'
-          targetdir: 'coveragereport'
-          reporttypes: 'Html;Badges'
-
-      - name: Upload Test Coverage Reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coveragereport
-
   release:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    needs: build-and-test
-
+    # Triggert NUR, wenn der Test-Workflow ERFOLGREICH war
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
     strategy:
       matrix:
         include:
@@ -59,12 +29,15 @@ jobs:
     permissions:
       contents: write
       packages: write
-
+    
     steps:
+      # Da workflow_run im Kontext des Default-Branches startet, checken wir 
+      # hier explizit den exakten Commit aus, der den Test ausgelöst hat
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      # Berechnet den 7-stelligen Short-SHA für ein kürzeres Release-Tag
       - name: Set Short SHA
         id: vars
         shell: bash
@@ -90,7 +63,6 @@ jobs:
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # Nutzt jetzt den kurzen SHA (z.B. release-dea3faf)
           tag_name: release-${{ steps.vars.outputs.sha_short }}
           name: Release ${{ steps.vars.outputs.sha_short }}
           draft: false
@@ -98,4 +70,3 @@ jobs:
           files: ./publish/${{ matrix.artifact_name }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
