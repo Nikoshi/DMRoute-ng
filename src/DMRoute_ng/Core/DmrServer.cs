@@ -76,7 +76,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         if (payload.Length < 8) return;
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload[4..8]);
 
-        logger.LogInformation("<-- RPTL von ID {RepeaterId}", repeaterId);
+        //logger.LogInformation("<-- RPTL von ID {RepeaterId}", repeaterId);
 
         if (!registry.TryGet(repeaterId, out var repeater) || repeater == null)
         {
@@ -90,7 +90,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         repeater.EndPoint = endPoint;
         repeater.State = RepeaterState.ChallengeSent;
 
-        logger.LogInformation("--> RPTACK (Challenge gesendet an {RepeaterId})", repeaterId);
+        //logger.LogInformation("--> RPTACK (Challenge gesendet an {RepeaterId})", repeaterId);
         SendTo(PacketUtils.BuildRptAck(randomSalt), endPoint);
     }
 
@@ -103,7 +103,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
 
         if (!registry.TryGet(repeaterId, out var repeater) || repeater == null) return;
 
-        logger.LogInformation("<-- RPTK von ID {RepeaterId}", repeaterId);
+        //logger.LogInformation("<-- RPTK von ID {RepeaterId}", repeaterId);
 
         var pskLength = Encoding.ASCII.GetByteCount(repeater.PreSharedKey);
         Span<byte> dataToHash = stackalloc byte[4 + pskLength];
@@ -123,7 +123,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
             repeater.State = RepeaterState.LoggedIn;
             repeater.LastPing = DateTime.UtcNow;
 
-            logger.LogInformation("--> RPTACK (Repeater {RepeaterId} erfolgreich eingeloggt)", repeaterId);
+            //logger.LogInformation("--> RPTACK (Repeater {RepeaterId} erfolgreich eingeloggt)", repeaterId);
             SendTo(PacketUtils.BuildRptAck((uint)repeaterId), repeater.EndPoint!);
         }
         else

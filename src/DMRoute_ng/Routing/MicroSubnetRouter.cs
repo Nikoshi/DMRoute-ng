@@ -53,7 +53,7 @@ public class MicroSubnetRouter
         // 4. SdsGateway-Abfang (Phase 2)
         if (isDataFrame)
         {
-            _logger.LogDebug("Data-Frame von {SrcId} empfangen. Geht ans SdsGateway...", srcId);
+            // _logger.LogDebug("Data-Frame von {SrcId} empfangen. Geht ans SdsGateway...", srcId);
             OnDataFrameReceived?.Invoke([.. packet], sourceRepeater.EndPoint!.ToString());
         }
 

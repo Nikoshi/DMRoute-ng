@@ -14,25 +14,7 @@ builder.Logging.SetMinimumLevel(LogLevel.Debug);
 builder.Services.AddSingleton<RepeaterRegistry>(sp => 
 {
     var registry = new RepeaterRegistry();
-    
-    // Konfiguration für deinen Pi-Star anlegen
-    var repeaterConfig = new RepeaterConfiguration(
-        "M1ABC",
-        "446.00625",
-        "446.00625",
-        0,
-        1,
-        0,
-        0,
-        0,
-        "",
-        "",
-        "",
-        "",
-        ""
-    );
-    
-    var hotspot = new Repeater(1000001, "s3cr37w0rd", RepeaterState.Disconnected, repeaterConfig);
+    var hotspot = new Repeater(1000001, "s3cr37w0rd", RepeaterState.Disconnected, null);
 
     registry.AddOrUpdate(hotspot);
     return registry;
@@ -49,7 +31,6 @@ builder.Services.AddSingleton(sp =>
 
 // UDP-Server starten
 builder.Services.AddHostedService<DmrServer>();
-
 builder.Services.AddSingleton<SdsGateway>();
 
 var host = builder.Build();

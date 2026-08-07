@@ -35,8 +35,8 @@ public class SdsGateway
             Bptc19696.Decode(payload, decodedHeader);
 
             var expectedBlocks = decodedHeader[8] & 0x7F;
-            _logger.LogInformation("DATA HEADER (Confirmed) von {SrcId}. Erwartete Blöcke: {Blocks}. HEX: {Hex}", 
-                srcId, expectedBlocks, BitConverter.ToString([.. decodedHeader]));
+            //_logger.LogInformation("DATA HEADER (Confirmed) von {SrcId}. Erwartete Blöcke: {Blocks}. HEX: {Hex}", 
+            //    srcId, expectedBlocks, BitConverter.ToString([.. decodedHeader]));
 
             _messageBuffers[srcId] = (expectedBlocks, []);
         }
@@ -66,8 +66,8 @@ public class SdsGateway
             lock (session.Buffer)
             {
                 session.Buffer.AddRange(decodedBlock);
-                _logger.LogInformation("DATA BLOCK (Type {Type:X2}) von {SrcId}. Aktueller Buffer: {Count} Bytes. HEX: {Hex}", 
-                    dataType, srcId, session.Buffer.Count, BitConverter.ToString(session.Buffer.ToArray()));
+                //_logger.LogInformation("DATA BLOCK (Type {Type:X2}) von {SrcId}. Aktueller Buffer: {Count} Bytes. HEX: {Hex}", 
+                //    dataType, srcId, session.Buffer.Count, BitConverter.ToString(session.Buffer.ToArray()));
 
                 if (session.Buffer.Count >= session.ExpectedBlocks * blockSize)
                 {
@@ -100,7 +100,7 @@ public class SdsGateway
                             // Verhindert leere Ausgaben bei reinen Delivery-ACKs
                             if (!string.IsNullOrWhiteSpace(text)) 
                             {
-                                _logger.LogInformation("SMS von {SrcId}: {Text}", srcId, text);
+                                _logger.LogInformation("SMS von {SrcId} and {DstId}: {Text}", srcId, "(Dst fehlt noch!)", text);
                             }
                         }
                     }
