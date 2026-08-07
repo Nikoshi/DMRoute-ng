@@ -44,7 +44,6 @@ jobs:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     needs: build-and-test
 
-    # Hier definieren wir die Matrix für beide Betriebssysteme
     strategy:
       matrix:
         include:
@@ -57,7 +56,6 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
-    # Behebt den 403-Fehler: Erlaubt das Schreiben von Releases und Paketen
     permissions:
       contents: write
       packages: write
@@ -65,6 +63,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Berechnet den 7-stelligen Short-SHA für ein kürzeres Release-Tag
+      - name: Set Short SHA
+        id: vars
+        shell: bash
+        run: echo "sha_short=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
       - name: Setup .NET 11
         uses: actions/setup-dotnet@v4
@@ -83,16 +87,15 @@ jobs:
             -p:IlcGenerateMsvcBindOptions=true \
             --output ./publish/${{ matrix.artifact_name }}
 
-      # Da Windows und Linux parallel laufen, nutzen wir "contents: write", 
-      # damit beide Runner ihre Datei sicher in dasselbe Release hochladen können.
-      # softprops/action-gh-release unterstützt das parallele Hochladen automatisch.
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: release-${{ github.sha }}
-          name: Release ${{ github.sha }}
+          # Nutzt jetzt den kurzen SHA (z.B. release-dea3faf)
+          tag_name: release-${{ steps.vars.outputs.sha_short }}
+          name: Release ${{ steps.vars.outputs.sha_short }}
           draft: false
           prerelease: false
           files: ./publish/${{ matrix.artifact_name }}/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
