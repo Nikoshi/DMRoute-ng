@@ -143,7 +143,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         {
             Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
             
-            logger.LogDebug("<-- RPTPING | --> MSTPONG für {RepeaterId}", repeaterId);
+            //logger.LogDebug("<-- RPTPING | --> MSTPONG für {RepeaterId}", repeaterId);
             SendTo(PacketUtils.BuildMstPong(repeaterId), repeater.EndPoint!);
         }
         else

@@ -25,6 +25,11 @@ public class SdsGateway
 
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var dataType = (byte)(packet[15] & 0x0F);
+        
+        // 0x06 = Data Header, 0x07 = 1/2 Rate Data, 0x08 = 3/4 Rate Data
+        // Ignoriere jegliche Voice/Signalisierungs-Daten rigoros (ohne Log), da sie nun im Router abgehandelt werden
+        if (dataType < 0x06 || dataType > 0x08) return;
+
         var payload = packet.AsSpan(20, 33);
 
         if (dataType == 0x06) 
@@ -34,7 +39,7 @@ public class SdsGateway
             var expectedBlocks = decodedHeader[8] & 0x7F;
             _messageBuffers[srcId] = (expectedBlocks, []);
         }
-        else if (dataType == 0x07 || dataType == 0x08) 
+        else if (dataType is 0x07 or 0x08) 
         {
             if (!_messageBuffers.TryGetValue(srcId, out var session)) return;
 
@@ -86,11 +91,6 @@ public class SdsGateway
                     _messageBuffers.TryRemove(srcId, out _);
                 }
             }
-        }
-        else
-        {
-            // Nur noch als Debug loggen, um die Konsole bei normalen Voice/CSBK-Daten nicht vollzuspammen
-            _logger.LogDebug("Ignorierter DataType von {SrcId}: {Type:X2}", srcId, dataType);
         }
     }
 }

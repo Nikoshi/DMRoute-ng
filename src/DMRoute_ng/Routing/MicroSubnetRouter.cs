@@ -8,19 +8,33 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Routing;
 
-public class MicroSubnetRouter(
-    ILogger<MicroSubnetRouter> logger,
-    RepeaterRegistry registry,
-    MasterRegistry masterRegistry,
-    int masterZoneId)
+public class MicroSubnetRouter
 {
+    private readonly ILogger<MicroSubnetRouter> _logger;
+    private readonly RepeaterRegistry _registry;
+    private readonly MasterRegistry _masterRegistry;
+    private readonly int _masterZoneId;
+
     private readonly ConcurrentDictionary<int, int> _localDeviceRouting = new();
+    
+    // Tracking für aktive Anrufe (Zero-Allocation über ConcurrentDictionary)
+    // Key: SourceId (DMR-ID des Senders)
+    // Value: Letzter Zeitstempel in Ticks (für künftige Timeouts/Housekeeping)
+    private readonly ConcurrentDictionary<int, long> _activeCalls = new();
 
     public event Action<byte[], string>? OnDataFrameReceived;
+    
+    // Neues Event für externe Status-Dienste (z. B. Dashboards oder Call-Logs)
+    public event Action<int, int, bool, byte>? OnSignalingReceived;
 
-    // MasterRegistry injizieren
+    public MicroSubnetRouter(ILogger<MicroSubnetRouter> logger, RepeaterRegistry registry, MasterRegistry masterRegistry, int masterZoneId)
+    {
+        _logger = logger;
+        _registry = registry;
+        _masterRegistry = masterRegistry;
+        _masterZoneId = masterZoneId;
+    }
 
-    // ReSharper disable once CognitiveComplexity
     public void RouteDmrd(ReadOnlySpan<byte> packet, IPEndPoint remoteEndPoint, IDmrSender sender)
     {
         if (packet.Length < 23) return; 
@@ -34,14 +48,17 @@ public class MicroSubnetRouter(
         var isGroupCall = !isUnitCall;
         var isDataFrame = (packet[15] & 0x20) != 0; 
         
+        // Neu: Datentyp extrahieren (unterste 4 Bits)
+        var dataType = (byte)(bits & 0x0F);
+        
         // 1. Herkunft prüfen (Lokal vs. Mesh)
-        var isLocalOrigin = registry.TryGet(repeaterId, out var sourceRepeater) && sourceRepeater.State == RepeaterState.LoggedIn;
-        var isMeshOrigin = false;
+        bool isLocalOrigin = _registry.TryGet(repeaterId, out var sourceRepeater) && sourceRepeater.State == RepeaterState.LoggedIn;
+        bool isMeshOrigin = false;
 
         if (!isLocalOrigin)
         {
             var originZoneId = repeaterId / 10000;
-            if (masterRegistry.TryGet(originZoneId, out var masterPeer) && masterPeer.DataEndPoint.Equals(remoteEndPoint))
+            if (_masterRegistry.TryGet(originZoneId, out var masterPeer) && masterPeer.DataEndPoint.Equals(remoteEndPoint))
             {
                 isMeshOrigin = true;
             }
@@ -49,25 +66,27 @@ public class MicroSubnetRouter(
 
         if (!isLocalOrigin && !isMeshOrigin) return;
 
-        // 2. Lokales Status-Tracking (Nur für eigene Hotspots)
+        // 2. Lokales Status-Tracking
         if (isLocalOrigin)
         {
             _localDeviceRouting[srcId] = repeaterId;
         }
 
+        // 3. Call-State-Signalisierung und Tracking (Hot-Path)
+        HandleSignaling(srcId, dstId, isGroupCall, dataType);
+
         if (isDataFrame)
         {
-            var epString = isLocalOrigin ? sourceRepeater!.EndPoint!.ToString() : remoteEndPoint.ToString();
+            string epString = isLocalOrigin ? sourceRepeater!.EndPoint!.ToString() : remoteEndPoint.ToString();
             OnDataFrameReceived?.Invoke([.. packet], epString);
         }
 
         var routeCount = 0;
 
-        // 3. Routing-Weiche
+        // 4. Routing-Weiche
         if (isGroupCall)
         {
-            // A: An lokale Hotspots verteilen
-            foreach (var kvp in registry.GetAll())
+            foreach (var kvp in _registry.GetAll())
             {
                 var peer = kvp.Value;
                 if (peer.State != RepeaterState.LoggedIn || (isLocalOrigin && peer.Id == repeaterId)) continue;
@@ -76,10 +95,9 @@ public class MicroSubnetRouter(
                 routeCount++;
             }
 
-            // B: An andere Master verteilen (Nur wenn Ursprung lokal ist -> verhindert Mesh-Routing-Loops)
             if (isLocalOrigin)
             {
-                foreach (var kvp in masterRegistry.GetAll())
+                foreach (var kvp in _masterRegistry.GetAll())
                 {
                     sender.SendTo(packet, kvp.Value.DataEndPoint);
                     routeCount++;
@@ -90,34 +108,81 @@ public class MicroSubnetRouter(
         {
             var targetZoneId = dstId / 100;
 
-            if (targetZoneId == masterZoneId)
+            if (targetZoneId == _masterZoneId)
             {
-                // Ziel ist unsere Zone (Lokaler Unicast)
                 if (_localDeviceRouting.TryGetValue(dstId, out var targetRepeaterId) && 
-                    registry.TryGet(targetRepeaterId, out var targetRepeater))
+                    _registry.TryGet(targetRepeaterId, out var targetRepeater))
                 {
                     sender.SendTo(packet, targetRepeater.EndPoint!);
                     routeCount++;
                 }
                 else
                 {
-                    logger.LogWarning("Lokales Ziel {DstId} unbekannt", dstId);
+                    // Fehler-Log nur noch bei Rufaufbau (0x01) oder CSBK (0x03) verhindern Spam
+                    if (dataType == 0x01 || dataType == 0x03)
+                    {
+                        _logger.LogWarning("Lokales Ziel {DstId} unbekannt.", dstId);
+                    }
                 }
             }
             else
             {
-                // Ziel ist Fremd-Zone (Mesh Unicast)
-                if (masterRegistry.TryGet(targetZoneId, out var targetMaster))
+                if (_masterRegistry.TryGet(targetZoneId, out var targetMaster))
                 {
                     sender.SendTo(packet, targetMaster.DataEndPoint);
-                    logger.LogInformation("--> Mesh PrivateCall von {SrcId} an {DstId} weitergeleitet an Zone {Zone} ({Ip})", 
-                        srcId, dstId, targetZoneId, targetMaster.DataEndPoint);
+                    
+                    // Erfolgs-Log ebenfalls nur noch einmalig bei Start
+                    if (dataType == 0x01)
+                    {
+                        _logger.LogInformation("--> Mesh PrivateCall-Start von {SrcId} an {DstId} (Zone {Zone})", 
+                            srcId, dstId, targetZoneId);
+                    }
                     routeCount++;
                 }
                 else
                 {
-                    logger.LogDebug("Ziel {DstId} (Zone {TargetZone}) unbekannt oder offline", dstId, targetZoneId);
+                    if (dataType == 0x01 || dataType == 0x03)
+                    {
+                        _logger.LogDebug("Ziel {DstId} (Zone {TargetZone}) unbekannt oder offline.", dstId, targetZoneId);
+                    }
                 }
+            }
+        }
+    }
+
+    private void HandleSignaling(int srcId, int dstId, bool isGroupCall, byte dataType)
+    {
+        if (dataType == 0x01) // Rufbeginn (Voice LC Header)
+        {
+            if (_activeCalls.TryAdd(srcId, DateTime.UtcNow.Ticks))
+            {
+                _logger.LogInformation("START: {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
+                OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+            }
+            else
+            {
+                _activeCalls[srcId] = DateTime.UtcNow.Ticks;
+            }
+        }
+        else if (dataType == 0x02) // Rufende (Voice Terminator)
+        {
+            if (_activeCalls.TryRemove(srcId, out _))
+            {
+                _logger.LogInformation("ENDE:  {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
+                OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+            }
+        }
+        else if (dataType == 0x03) // CSBK (Control Signalling Block - OACSU)
+        {
+            // CSBK wird beim PrivateCall oft vorab (als "Ping") gesendet, um das Ziel aufzuwecken.
+            _logger.LogDebug("CSBK: Signalisierung von {SrcId} an {DstId}", srcId, dstId);
+            OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+        }
+        else if (dataType == 0x00) // Laufendes Audio (Voice Frame ohne LC)
+        {
+            if (_activeCalls.ContainsKey(srcId))
+            {
+                _activeCalls[srcId] = DateTime.UtcNow.Ticks;
             }
         }
     }
