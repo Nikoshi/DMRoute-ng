@@ -61,7 +61,8 @@ public sealed class MeshDiscoveryService : BackgroundService
     private async Task SendBroadcastLoop(CancellationToken token)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-        var broadcastEndpoint = new IPEndPoint(IPAddress.Broadcast, _discoveryPort);
+        // Statt IPAddress.Broadcast (255.255.255.255) das spezifische Subnetz nutzen // TODO: Das muss dann natürlich entweder automatisch ermittelt werden oder beim Start ;)
+        var broadcastEndpoint = new IPEndPoint(IPAddress.Parse("10.229.157.255"), _discoveryPort);
 
         // Statischer Puffer für DMBD [Header(4) + Zone(4) + Port(2) + Nonce(32)]
         var packet = new byte[42]; 
