@@ -119,17 +119,18 @@ public sealed class MeshDiscoveryService : BackgroundService
         var remoteDataPort = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(8, 2));
         var receivedHash = payload.Slice(10, 32);
 
-        // Erwarteten Hash über lokalen Nonce bilden
         Span<byte> expectedHash = stackalloc byte[32];
         HMACSHA256.HashData(_meshPskBytes, _currentNonce, expectedHash);
 
         if (CryptographicOperations.FixedTimeEquals(expectedHash, receivedHash))
         {
-            // Verifiziert -> In Registry aufnehmen. Die Data-IP ist die IP des Absenders, Port kommt aus Payload.
             var dataEndpoint = new IPEndPoint(remote.Address, remoteDataPort);
-            _masterRegistry.AddOrUpdate(remoteZoneId, dataEndpoint);
             
-            _logger.LogInformation("Mesh: Zone {Zone} verifiziert unter {IP}:{Port}", remoteZoneId, remote.Address, remoteDataPort);
+            // Nur loggen, wenn die Zone neu dazukam
+            if (_masterRegistry.AddOrUpdate(remoteZoneId, dataEndpoint))
+            {
+                _logger.LogInformation("Mesh: Zone {Zone} verifiziert unter {IP}:{Port}", remoteZoneId, remote.Address, remoteDataPort);
+            }
         }
     }
 }

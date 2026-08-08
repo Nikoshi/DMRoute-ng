@@ -17,16 +17,7 @@ var myZonePsk = builder.Configuration.GetValue<string>("ZonePsk", "s3cr37w0rd");
 
 
 builder.Services.AddSingleton<MasterRegistry>();
-
-builder.Services.AddHostedService(sp => new MeshDiscoveryService(
-    sp.GetRequiredService<ILogger<MeshDiscoveryService>>(),
-    sp.GetRequiredService<MasterRegistry>(),
-    myZoneId: myZoneId,
-    myDataPort: 62031, // Port, auf dem DmrServer lauscht
-    discoveryPort: 42069, // Konfigurierbarer Mesh-Port
-    meshPsk: meshPsk
-));
-
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MasterRegistry>());
 builder.Services.AddSingleton<RepeaterRegistry>(sp => 
     new RepeaterRegistry(sp.GetRequiredService<ILogger<RepeaterRegistry>>(), myZoneId, myZonePsk)
 );
@@ -41,6 +32,15 @@ builder.Services.AddSingleton(sp =>
         myZoneId
     )
 );
+
+builder.Services.AddHostedService(sp => new MeshDiscoveryService(
+    sp.GetRequiredService<ILogger<MeshDiscoveryService>>(),
+    sp.GetRequiredService<MasterRegistry>(),
+    myZoneId: myZoneId,
+    myDataPort: 62031, // Port, auf dem DmrServer lauscht
+    discoveryPort: 42069, // Konfigurierbarer Mesh-Port
+    meshPsk: meshPsk
+));
 
 // UDP-Server starten
 builder.Services.AddHostedService<DmrServer>();
