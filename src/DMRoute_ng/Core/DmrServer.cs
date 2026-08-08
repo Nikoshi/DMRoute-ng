@@ -63,7 +63,8 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         }
         else if (payload.StartsWith(PacketUtils.DmrdHeader))
         {
-            router.RouteDmrd(payload, this);
+            // remoteEndPoint übergeben
+            router.RouteDmrd(payload, remoteEndPoint, this); 
         }
         else if (payload.StartsWith(PacketUtils.RptcHeader))
         {

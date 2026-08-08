@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Net;
 using DMRoute_ng.Core;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Types;
@@ -7,107 +8,117 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Routing;
 
-public class MicroSubnetRouter
+public class MicroSubnetRouter(
+    ILogger<MicroSubnetRouter> logger,
+    RepeaterRegistry registry,
+    MasterRegistry masterRegistry,
+    int masterZoneId)
 {
-    private readonly ILogger<MicroSubnetRouter> _logger;
-    private readonly RepeaterRegistry _registry;
-    
-    // Die feste Basis-Zone, für die dieser Master zuständig ist (z.B. 100)
-    private readonly int _masterZoneId;
-
-    // Lokales Status-Tracking (DMR-ID des Geräts → ID des lokalen Repeaters/Hotspots)
     private readonly ConcurrentDictionary<int, int> _localDeviceRouting = new();
 
-    // Event für Phase 2 (SdsGateway)
     public event Action<byte[], string>? OnDataFrameReceived;
 
-    public MicroSubnetRouter(ILogger<MicroSubnetRouter> logger, RepeaterRegistry registry, int masterZoneId)
-    {
-        _logger = logger;
-        _registry = registry;
-        _masterZoneId = masterZoneId;
-    }
+    // MasterRegistry injizieren
 
     // ReSharper disable once CognitiveComplexity
-    public void RouteDmrd(ReadOnlySpan<byte> packet, IDmrSender sender)
+    public void RouteDmrd(ReadOnlySpan<byte> packet, IPEndPoint remoteEndPoint, IDmrSender sender)
     {
         if (packet.Length < 23) return; 
 
-        // 1. IDs aus dem Homebrew-Header extrahieren
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(packet.Slice(11, 4));
         
-        // 2. Flags aus Byte 15 auslesen
         var bits = packet[15];
         var isUnitCall = (bits & 0x40) != 0; 
         var isGroupCall = !isUnitCall;
-
-        // Frame-Typ (Voice vs. Data) exakt auslesen.
         var isDataFrame = (packet[15] & 0x20) != 0; 
         
-        if (!_registry.TryGet(repeaterId, out var sourceRepeater) || sourceRepeater == null) return;
+        // 1. Herkunft prüfen (Lokal vs. Mesh)
+        var isLocalOrigin = registry.TryGet(repeaterId, out var sourceRepeater) && sourceRepeater.State == RepeaterState.LoggedIn;
+        var isMeshOrigin = false;
 
-        // 3. Status-Tracking: Welches Gerät sendet gerade über welchen Hotspot?
-        _localDeviceRouting[srcId] = repeaterId;
-
-        // 4. SdsGateway-Abfang (Phase 2)
-        if (isDataFrame)
+        if (!isLocalOrigin)
         {
-            // _logger.LogDebug("Data-Frame von {SrcId} empfangen. Geht ans SdsGateway...", srcId);
-            OnDataFrameReceived?.Invoke([.. packet], sourceRepeater.EndPoint!.ToString());
+            var originZoneId = repeaterId / 10000;
+            if (masterRegistry.TryGet(originZoneId, out var masterPeer) && masterPeer.DataEndPoint.Equals(remoteEndPoint))
+            {
+                isMeshOrigin = true;
+            }
         }
 
-        // 5. Voice-Routing (Phase 1)
+        if (!isLocalOrigin && !isMeshOrigin) return;
+
+        // 2. Lokales Status-Tracking (Nur für eigene Hotspots)
+        if (isLocalOrigin)
+        {
+            _localDeviceRouting[srcId] = repeaterId;
+        }
+
+        if (isDataFrame)
+        {
+            var epString = isLocalOrigin ? sourceRepeater!.EndPoint!.ToString() : remoteEndPoint.ToString();
+            OnDataFrameReceived?.Invoke([.. packet], epString);
+        }
+
         var routeCount = 0;
 
+        // 3. Routing-Weiche
         if (isGroupCall)
         {
-            // Lokales Group-Routing: An alle Hotspots in unserer Zone senden (außer zum Absender)
-            foreach (var kvp in _registry.GetAll())
+            // A: An lokale Hotspots verteilen
+            foreach (var kvp in registry.GetAll())
             {
                 var peer = kvp.Value;
-                if (peer.State != RepeaterState.LoggedIn || peer.Id == repeaterId) continue;
+                if (peer.State != RepeaterState.LoggedIn || (isLocalOrigin && peer.Id == repeaterId)) continue;
     
                 sender.SendTo(packet, peer.EndPoint!);
                 routeCount++;
             }
+
+            // B: An andere Master verteilen (Nur wenn Ursprung lokal ist -> verhindert Mesh-Routing-Loops)
+            if (isLocalOrigin)
+            {
+                foreach (var kvp in masterRegistry.GetAll())
+                {
+                    sender.SendTo(packet, kvp.Value.DataEndPoint);
+                    routeCount++;
+                }
+            }
         }
         else if (isUnitCall)
         {
-            // Subnetting: Gehört das Ziel zu unserer Zone?
             var targetZoneId = dstId / 100;
 
-            if (targetZoneId == _masterZoneId)
+            if (targetZoneId == masterZoneId)
             {
-                // --- LOKALER PRIVATE CALL ---
-                if (_localDeviceRouting.TryGetValue(dstId, out var targetRepeaterId))
+                // Ziel ist unsere Zone (Lokaler Unicast)
+                if (_localDeviceRouting.TryGetValue(dstId, out var targetRepeaterId) && 
+                    registry.TryGet(targetRepeaterId, out var targetRepeater))
                 {
-                    if (_registry.TryGet(targetRepeaterId, out var targetRepeater) && targetRepeater != null)
-                    {
-                        // Gezielter Unicast an exakt den Hotspot, wo das Gerät zuletzt war
-                        sender.SendTo(packet, targetRepeater.EndPoint!);
-                        routeCount++;
-                    }
+                    sender.SendTo(packet, targetRepeater.EndPoint!);
+                    routeCount++;
                 }
                 else
                 {
-                    _logger.LogWarning("Lokales Ziel {DstId} unbekannt. Das Gerät hat sich noch nicht gemeldet", dstId);
-                    // Optional: Später könnte man hier ein Paging (Broadcast) senden, um das Gerät zu wecken.
+                    logger.LogWarning("Lokales Ziel {DstId} unbekannt", dstId);
                 }
             }
             else
             {
-                // --- FREMD-ZONE ---
-                _logger.LogDebug("Ziel {DstId} gehört zu Fremd-Zone {TargetZone}. Paket wird (noch) verworfen", dstId, targetZoneId);
-                // Hier greift in Phase 4 die M2M-Tabelle: Unicast an die WireGuard-IP des anderen Masters.
+                // Ziel ist Fremd-Zone (Mesh Unicast)
+                if (masterRegistry.TryGet(targetZoneId, out var targetMaster))
+                {
+                    sender.SendTo(packet, targetMaster.DataEndPoint);
+                    logger.LogInformation("--> Mesh PrivateCall von {SrcId} an {DstId} weitergeleitet an Zone {Zone} ({Ip})", 
+                        srcId, dstId, targetZoneId, targetMaster.DataEndPoint);
+                    routeCount++;
+                }
+                else
+                {
+                    logger.LogDebug("Ziel {DstId} (Zone {TargetZone}) unbekannt oder offline", dstId, targetZoneId);
+                }
             }
-        }
-
-        if (routeCount > 0)
-        {
-            _logger.LogDebug("--> {Type} von {SrcId} an {DstId} geroutet (Ziele: {Count})", 
-                isUnitCall ? "PrivateCall" : "GroupCall", srcId, dstId, routeCount);
         }
     }
 }

@@ -29,6 +29,7 @@ builder.Services.AddSingleton(sp =>
     new MicroSubnetRouter(
         sp.GetRequiredService<ILogger<MicroSubnetRouter>>(), 
         sp.GetRequiredService<RepeaterRegistry>(), 
+        sp.GetRequiredService<MasterRegistry>(), // Neue Abhängigkeit
         myZoneId
     )
 );
