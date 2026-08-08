@@ -5,14 +5,16 @@ using Microsoft.Extensions.Hosting;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Routing;
 using DMRoute_ng.Types;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
-const int myZoneId = 100;
-const string myZonePsk = "s3cr37w0rd";
-const string meshPsk = "s3cr37m3sh";
+var myZoneId = builder.Configuration.GetValue("ZoneId", 100);
+var meshPsk = builder.Configuration.GetValue<string>("MeshPsk", "s3cr37m3sh");
+var myZonePsk = builder.Configuration.GetValue<string>("ZonePsk", "s3cr37w0rd");
+
 
 builder.Services.AddSingleton<MasterRegistry>();
 
