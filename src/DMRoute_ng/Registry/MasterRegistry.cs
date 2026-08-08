@@ -33,7 +33,23 @@ public sealed class MasterRegistry(ILogger<MasterRegistry> logger) : BackgroundS
 
     public bool TryGet(int zoneId, out MasterPeer peer) => _peers.TryGetValue(zoneId, out peer!);
     
+    // Legacy für Debugging / Status-Websites etc.
     public ConcurrentDictionary<int, MasterPeer> GetAll() => _peers;
+
+    /// <summary>
+    /// Zero-Allocation Methode für Talkgroup 1 (Global).
+    /// Füllt den übergebenen Span mit allen aktiven Endpoints und gibt die Anzahl zurück.
+    /// </summary>
+    public int GetActiveEndpoints(Span<IPEndPoint> buffer)
+    {
+        var count = 0;
+        foreach (var kvp in _peers)
+        {
+            if (count >= buffer.Length) break;
+            buffer[count++] = kvp.Value.DataEndPoint;
+        }
+        return count;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -50,7 +66,7 @@ public sealed class MasterRegistry(ILogger<MasterRegistry> logger) : BackgroundS
                 {
                     if (_peers.TryRemove(kvp.Key, out _))
                     {
-                        logger.LogWarning("Mesh: Zone {ZoneId} Timeout (Offline)", kvp.Key);
+                        logger.LogWarning("Mesh: Zone {ZoneId} Timeout (Offline). Aus Routing entfernt.", kvp.Key);
                     }
                 }
             }
