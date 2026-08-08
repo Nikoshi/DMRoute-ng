@@ -1,43 +1,63 @@
 ﻿using DMRoute_ng.Registry;
 using DMRoute_ng.Types;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DMRoute_ng.Tests;
 
 public class RepeaterRegistryTests
 {
     [Fact]
-    public void AddAndRetrieveRepeater_ShouldSucceed()
+    public void TryGet_WithValidZoneId_ShouldCreateAndRetrieveRepeater()
     {
         // Arrange
-        var registry = new RepeaterRegistry();
-        var repeater = new Repeater(262101, "secret123", RepeaterState.Disconnected, null);
+        var logger = NullLogger<RepeaterRegistry>.Instance;
+        // MasterZoneId 26 bedeutet: Repeater-IDs müssen mit 26... beginnen (z. B. 1000001)
+        var registry = new RepeaterRegistry(logger, masterZoneId: 100, sharedPsk: "secret");
 
         // Act
-        registry.AddOrUpdate(repeater);
-        var found = registry.TryGet(262101, out var retrieved);
+        // 1000001 / 10000 = 100 (Mathematik stimmt überein)
+        var found = registry.TryGet(1000001, out var retrieved);
 
         // Assert
         Assert.True(found);
         Assert.NotNull(retrieved);
-        Assert.Equal("secret123", retrieved.PreSharedKey);
+        // PSK muss aus Master-PSK und Repeater-ID zusammengesetzt sein
+        Assert.Equal("secret1000001", retrieved.PreSharedKey);
         Assert.Equal(RepeaterState.Disconnected, retrieved.State);
     }
 
     [Fact]
-    public void UpdateRepeaterState_ShouldModifyExisting()
+    public void TryGet_WithInvalidZoneId_ShouldReturnFalse()
     {
         // Arrange
-        var registry = new RepeaterRegistry();
-        var repeater = new Repeater(262102, "secret123", RepeaterState.Disconnected, null);
-        registry.AddOrUpdate(repeater);
+        var logger = NullLogger<RepeaterRegistry>.Instance;
+        var registry = new RepeaterRegistry(logger, masterZoneId: 26, sharedPsk: "secret");
 
         // Act
-        repeater.State = RepeaterState.LoggedIn;
-        registry.AddOrUpdate(repeater);
-        registry.TryGet(262102, out var retrieved);
+        // 992101 / 10000 = 99 (Passt nicht zur MasterZoneId 26)
+        var found = registry.TryGet(992101, out var retrieved);
 
         // Assert
-        Assert.NotNull(retrieved);
-        Assert.Equal(RepeaterState.LoggedIn, retrieved.State);
+        Assert.False(found);
+        Assert.Null(retrieved);
+    }
+
+    [Fact]
+    public void TryGet_MultipleTimes_ShouldReturnSameInstance()
+    {
+        // Arrange
+        var logger = NullLogger<RepeaterRegistry>.Instance;
+        var registry = new RepeaterRegistry(logger, masterZoneId: 26, sharedPsk: "secret");
+
+        // Act
+        registry.TryGet(262101, out var first);
+        first.State = RepeaterState.LoggedIn;
+        
+        // Erneuter Abruf derselben ID
+        registry.TryGet(262101, out var second);
+
+        // Assert
+        Assert.Same(first, second);
+        Assert.Equal(RepeaterState.LoggedIn, second.State);
     }
 }
