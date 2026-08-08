@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using DMRoute_ng.Core;
 using DMRoute_ng.Registry;
+using DMRoute_ng.Types;
 using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Routing;
@@ -63,10 +64,11 @@ public class MicroSubnetRouter
         if (isGroupCall)
         {
             // Lokales Group-Routing: An alle Hotspots in unserer Zone senden (außer zum Absender)
-            foreach (var peer in _registry.GetActivePeers())
+            foreach (var kvp in _registry.GetAll())
             {
-                if (peer.Id == repeaterId) continue;
-                
+                var peer = kvp.Value;
+                if (peer.State != RepeaterState.LoggedIn || peer.Id == repeaterId) continue;
+    
                 sender.SendTo(packet, peer.EndPoint!);
                 routeCount++;
             }

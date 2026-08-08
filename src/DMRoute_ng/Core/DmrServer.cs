@@ -78,7 +78,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
 
         //logger.LogInformation("<-- RPTL von ID {RepeaterId}", repeaterId);
 
-        if (!registry.TryGet(repeaterId, out var repeater) || repeater == null)
+        if (!registry.TryGet(repeaterId, out var repeater))
         {
             logger.LogWarning("Repeater {RepeaterId} ist nicht registriert (Whitelist)", repeaterId);
             SendTo(PacketUtils.BuildMstNak(repeaterId), endPoint);
@@ -121,7 +121,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         if (CryptographicOperations.FixedTimeEquals(calculatedHash, receivedHash))
         {
             repeater.State = RepeaterState.LoggedIn;
-            repeater.LastPing = DateTime.UtcNow;
+            Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
 
             //logger.LogInformation("--> RPTACK (Repeater {RepeaterId} erfolgreich eingeloggt)", repeaterId);
             SendTo(PacketUtils.BuildRptAck((uint)repeaterId), repeater.EndPoint!);
@@ -140,7 +140,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
 
         if (registry.TryGet(repeaterId, out var repeater) && repeater?.State == RepeaterState.LoggedIn)
         {
-            repeater.LastPing = DateTime.UtcNow;
+            Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
             
             logger.LogDebug("<-- RPTPING | --> MSTPONG für {RepeaterId}", repeaterId);
             SendTo(PacketUtils.BuildMstPong(repeaterId), repeater.EndPoint!);
@@ -161,13 +161,13 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(offset, 4));
 
-        if (!registry.TryGet(repeaterId, out var repeater) || repeater == null) return;
+        if (!registry.TryGet(repeaterId, out var repeater)) return;
 
         if (isRptcl)
         {
             logger.LogInformation("<-- RPTCL (Disconnect) von ID {RepeaterId}", repeaterId);
             repeater.State = RepeaterState.Disconnected;
-            repeater.LastPing = null;
+            Volatile.Write(ref repeater.LastPingTicks, 0);
         }
         else
         {

@@ -4,11 +4,16 @@ namespace DMRoute_ng.Utils;
 
 public static class PacketUtils
 {
+    // HB Protocol
     public static ReadOnlySpan<byte> RptlHeader => "RPTL"u8;
     public static ReadOnlySpan<byte> RptkHeader => "RPTK"u8;
     public static ReadOnlySpan<byte> RptPingHeader => "RPTPING"u8;
     public static ReadOnlySpan<byte> DmrdHeader => "DMRD"u8;
     public static ReadOnlySpan<byte> RptcHeader => "RPTC"u8;
+    
+    // Master Discovery Protocol
+    public static ReadOnlySpan<byte> DmbdHeader => "DMBD"u8; // DMR Broadcast Discovery
+    public static ReadOnlySpan<byte> DmbcHeader => "DMBC"u8; // DMR Broadcast Challenge Response
     
     // Master Challenge (Antwort auf RPTL) im korrekten RPTACK-Format
     public static byte[] BuildRptAck(uint salt)

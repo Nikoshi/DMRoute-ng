@@ -10,17 +10,28 @@ using Microsoft.Extensions.Logging;
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
-// Registry registrieren und Test-Repeater "whitelisten"
-builder.Services.AddSingleton<RepeaterRegistry>(sp => 
-{
-    var registry = new RepeaterRegistry();
-    var hotspot = new Repeater(1000001, "s3cr37w0rd", RepeaterState.Disconnected, null);
-
-    registry.AddOrUpdate(hotspot);
-    return registry;
-});
-
 const int myZoneId = 100;
+const string myZonePsk = "s3cr37w0rd";
+const string meshPsk = "s3cr37m3sh";
+
+builder.Services.AddSingleton<MasterRegistry>();
+
+builder.Services.AddHostedService(sp => new MeshDiscoveryService(
+    sp.GetRequiredService<ILogger<MeshDiscoveryService>>(),
+    sp.GetRequiredService<MasterRegistry>(),
+    myZoneId: myZoneId,
+    myDataPort: 62031, // Port, auf dem DmrServer lauscht
+    discoveryPort: 42069, // Konfigurierbarer Mesh-Port
+    meshPsk: meshPsk
+));
+
+builder.Services.AddSingleton<RepeaterRegistry>(sp => 
+    new RepeaterRegistry(sp.GetRequiredService<ILogger<RepeaterRegistry>>(), myZoneId, myZonePsk)
+);
+
+// Als HostedService registrieren, damit das Housekeeping läuft
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RepeaterRegistry>());
+
 builder.Services.AddSingleton(sp => 
     new MicroSubnetRouter(
         sp.GetRequiredService<ILogger<MicroSubnetRouter>>(), 
