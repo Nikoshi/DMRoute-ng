@@ -150,24 +150,31 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         if (payload.Length < 11) return; 
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload[7..11]);
 
-        if (registry.TryGet(repeaterId, out var repeater) && repeater?.State == RepeaterState.LoggedIn)
+        if (registry.TryGet(repeaterId, out var repeater))
         {
-            Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
-            
-            //logger.LogDebug("<-- RPTPING | --> MSTPONG für {RepeaterId}", repeaterId);
-            SendTo(PacketUtils.BuildMstPong(repeaterId), repeater.EndPoint!);
+            // Soft-Reconnect: Erlaube Ping, auch wenn Disconnected, sofern Endpunkt noch übereinstimmt
+            if (repeater is { State: RepeaterState.Disconnected, EndPoint: not null } && repeater.EndPoint.Equals(endPoint))
+            {
+                logger.LogInformation("Soft-Reconnect durch Ping für Repeater {RepeaterId}", repeaterId);
+                repeater.State = RepeaterState.LoggedIn;
+            }
+
+            if (repeater.State == RepeaterState.LoggedIn)
+            {
+                Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
+                SendTo(PacketUtils.BuildMstPong(repeaterId), repeater.EndPoint!);
+                return;
+            }
         }
-        else
-        {
-            logger.LogWarning("RPTPING von nicht eingeloggtem Repeater {RepeaterId} erhalten", repeaterId);
-            SendTo(PacketUtils.BuildMstNak(repeaterId), endPoint);
-        }
+
+        logger.LogWarning("RPTPING von völlig unbekanntem Repeater {RepeaterId} erhalten", repeaterId);
+        SendTo(PacketUtils.BuildMstNak(repeaterId), endPoint);
     }
 
     private void HandleRptc(ReadOnlySpan<byte> payload, IPEndPoint endPoint)
     {
-        bool isRptcl = payload.Length >= 5 && payload[4] == 0x4C;
-        int offset = isRptcl ? 5 : 4; 
+        var isRptcl = payload.Length >= 5 && payload[4] == 0x4C;
+        var offset = isRptcl ? 5 : 4; 
         
         if (payload.Length < offset + 4) return;
         
@@ -183,6 +190,7 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         }
         else
         {
+            Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
             logger.LogInformation("<-- RPTC (Config) von ID {RepeaterId}", repeaterId);
             logger.LogInformation("--> RPTACK (Config bestätigt für {RepeaterId})", repeaterId);
             

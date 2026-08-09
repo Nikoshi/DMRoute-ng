@@ -54,6 +54,12 @@ public class MicroSubnetRouter
         var dataType = (byte)(bits & 0x0F);
         
         var isLocalOrigin = _registry.TryGet(repeaterId, out var sourceRepeater) && sourceRepeater.State == RepeaterState.LoggedIn;
+        
+        if (isLocalOrigin)
+        {
+            Volatile.Write(ref sourceRepeater!.LastPingTicks, DateTime.UtcNow.Ticks);
+        }
+        
         var isMeshOrigin = false;
 
         if (!isLocalOrigin)

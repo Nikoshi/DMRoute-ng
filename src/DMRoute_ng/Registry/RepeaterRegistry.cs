@@ -47,7 +47,7 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
         
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            long cutoffTicks = DateTime.UtcNow.AddSeconds(-15).Ticks;
+            long cutoffTicks = DateTime.UtcNow.AddSeconds(-45).Ticks;
 
             // foreach auf ConcurrentDictionary nutzt implizit einen Struct-Enumerator -> 0 Bytes GC Allokation
             foreach (var kvp in _repeaters)
@@ -55,12 +55,13 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
                 var repeater = kvp.Value;
                 if (repeater.State == RepeaterState.LoggedIn)
                 {
-                    // Atomarer Lesezugriff
                     var lastPing = Volatile.Read(ref repeater.LastPingTicks);
                     
                     if (lastPing > 0 && lastPing < cutoffTicks)
                     {
-                        logger.LogInformation("Timeout für Repeater {Id}. Setze auf Disconnected", repeater.Id);
+                        var secondsIdle = (DateTime.UtcNow.Ticks - lastPing) / TimeSpan.TicksPerSecond;
+                        logger.LogInformation("Timeout für Repeater {Id} nach {Seconds}s Inaktivität. Setze auf Disconnected", repeater.Id, secondsIdle);
+                        
                         repeater.State = RepeaterState.Disconnected;
                         Volatile.Write(ref repeater.LastPingTicks, 0);
                     }
