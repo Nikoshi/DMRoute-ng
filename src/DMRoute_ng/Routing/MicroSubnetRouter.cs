@@ -102,38 +102,26 @@ public class MicroSubnetRouter
         // Routing-Weiche
         if (isGroupCall)
         {
-            // a. Lokale Auslieferung: Jeder GroupCall wird lokal verteilt (außer an den Sender selbst)
             foreach (var kvp in _registry.GetAll())
             {
                 var peer = kvp.Value;
                 if (peer.State != RepeaterState.LoggedIn || (isLocalOrigin && peer.Id == repeaterId)) continue;
-    
                 sender.SendTo(packet, peer.EndPoint!);
             }
 
-            // b. Mesh-Auslieferung: Findet nur statt, wenn der Ruf lokal entstanden ist
             if (isLocalOrigin)
             {
-                var sourceHomeZone = srcId / 100;
-            
-                if (sourceHomeZone == _masterZoneId)
+                if (dstId == 1) 
                 {
-                    _localDeviceRouting[srcId] = repeaterId;
+                    foreach (var kvp in _masterRegistry.GetAll()) { sender.SendTo(packet, kvp.Value.DataEndPoint); }
                 }
-                else
+                else if (dstId == 2) 
                 {
-                    _roamingRegistry.TrackLocalGuest(srcId, sourceRepeater!.EndPoint!);
-
-                    if (dataType is 0x01 or 0x03)
-                    {
-                        if (_masterRegistry.TryGet(sourceHomeZone, out var homeMaster))
-                        {
-                            _logger.LogInformation("ROAM-Trigger: Sende Standort von {SrcId} an Home-Master {IP}", srcId, homeMaster.DataEndPoint.Address);
-                        
-                            // Fix: Nur IPAddress übergeben
-                            _ = _meshService.SendLocationUpdateAsync(srcId, homeMaster.DataEndPoint.Address);
-                        }
-                    }
+                    // Kein Mesh-Routing
+                }
+                else if (dstId is >= 100 and <= 999) 
+                {
+                    if (_masterRegistry.TryGet(dstId, out var targetMaster)) { sender.SendTo(packet, targetMaster.DataEndPoint); }
                 }
             }
         }

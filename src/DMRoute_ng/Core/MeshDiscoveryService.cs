@@ -81,11 +81,10 @@ public sealed class MeshDiscoveryService : BackgroundService
 
     public async Task SendLocationUpdateAsync(int deviceId, IPAddress targetAddress)
     {
-        // Fix: Explizit den Mesh-Port nutzen
         var targetEndpoint = new IPEndPoint(targetAddress, _discoveryPort);
 
-        byte[] packet = new byte[52];
-        Encoding.ASCII.GetBytes("ROAM").CopyTo(packet, 0);
+        var packet = new byte[52];
+        "ROAM"u8.ToArray().CopyTo(packet, 0);
         BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(4, 4), deviceId);
         BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(8, 4), _myZoneId);
         BinaryPrimitives.WriteInt64BigEndian(packet.AsSpan(12, 8), DateTime.UtcNow.Ticks);
@@ -94,8 +93,10 @@ public sealed class MeshDiscoveryService : BackgroundService
 
         try
         {
-            await _socket.SendToAsync(packet, SocketFlags.None, targetEndpoint);
-            _logger.LogDebug("ROAM Update gesendet");
+            using var unicastClient = new UdpClient();
+            await unicastClient.SendAsync(packet, targetEndpoint);
+            
+            _logger.LogDebug("ROAM Update für ID {DeviceId} an {IP} gesendet", deviceId, targetAddress);
         }
         catch (Exception ex)
         {
