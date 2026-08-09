@@ -114,42 +114,25 @@ public class MicroSubnetRouter
             // b. Mesh-Auslieferung: Findet nur statt, wenn der Ruf lokal entstanden ist
             if (isLocalOrigin)
             {
-                switch (dstId)
+                var sourceHomeZone = srcId / 100;
+            
+                if (sourceHomeZone == _masterZoneId)
                 {
-                    // Global
-                    case 1:
-                    {
-                        foreach (var kvp in _masterRegistry.GetAll())
-                        {
-                            sender.SendTo(packet, kvp.Value.DataEndPoint);
-                        }
+                    _localDeviceRouting[srcId] = repeaterId;
+                }
+                else
+                {
+                    _roamingRegistry.TrackLocalGuest(srcId, sourceRepeater!.EndPoint!);
 
-                        break;
-                    }
-                    // Lokal (Zone-intern)
-                    case 2:
-                        // Wird nicht ins Mesh geroutet
-                        break;
-                    // Zonen-spezifisch
-                    case >= 100 and <= 999:
+                    if (dataType is 0x01 or 0x03)
                     {
-                        // Wird nur an den spezifischen Zonen-Master gesendet
-                        if (_masterRegistry.TryGet(dstId, out var targetMaster))
+                        if (_masterRegistry.TryGet(sourceHomeZone, out var homeMaster))
                         {
-                            sender.SendTo(packet, targetMaster.DataEndPoint);
+                            _logger.LogInformation("ROAM-Trigger: Sende Standort von {SrcId} an Home-Master {IP}", srcId, homeMaster.DataEndPoint.Address);
+                        
+                            // Fix: Nur IPAddress übergeben
+                            _ = _meshService.SendLocationUpdateAsync(srcId, homeMaster.DataEndPoint.Address);
                         }
-
-                        break;
-                    }
-                    default:
-                    {
-                        // Optional: Unbekannte TGs ignorieren oder loggen
-                        if (dataType == 0x01)
-                        {
-                            _logger.LogDebug("GroupCall an undefinierte TG {DstId} wird nicht ins Mesh geroutet", dstId);
-                        }
-
-                        break;
                     }
                 }
             }
