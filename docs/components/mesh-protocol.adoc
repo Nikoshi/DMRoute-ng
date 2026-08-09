@@ -1,0 +1,16 @@
+= MeshDiscoveryService & Mesh Protocol
+:toc:
+:sectnums:
+
+== Übersicht
+Der `MeshDiscoveryService` verwaltet die dezentrale Erkennung von Zonen-Mastern und den dynamischen Austausch von Roaming-Daten zwischen diesen Zonen über den dedizierten UDP-Port 42069.
+
+== Pakettypen
+Das Protokoll verwendet zwei proprietäre Pakettypen:
+
+* **DMBC (Beacon):** Ein UDP-Broadcast (50 Bytes)[cite: 9]. Sendet der Master zyklisch alle 15 Sekunden, um anderen Zonen die eigene Erreichbarkeit (Zonen-ID) und den genutzten DMR-Daten-Port (Port 62031) mitzuteilen[cite: 9]. Der Empfang führt zur Registrierung oder Aktualisierung des Senders in der `MasterRegistry`[cite: 9].
+* **ROAM (Roaming Update):** Ein UDP-Unicast (52 Bytes)[cite: 9]. Wird gezielt an den Heimat-Master eines Geräts gesendet, sobald sich dieses in einer fremden Zone zu erkennen gibt[cite: 9]. Das Paket enthält die Geräte-ID und die neue Aufenthalts-Zone und aktualisiert die `RoamingRegistry`[cite: 9].
+
+== Sicherheit & Validierung
+* **Signatur:** Die Integrität aller Pakete wird durch einen 32 Byte großen HMAC-SHA256 sichergestellt[cite: 9]. Dieser wird mit einem globalen Mesh-PSK über den jeweiligen Header gebildet[cite: 9].
+* **Replay-Schutz:** Jedes Paket enthält einen UTC-Zeitstempel (Ticks)[cite: 9]. Empfangene Pakete, deren Zeitstempel mehr als 30 Sekunden von der lokalen Systemzeit abweichen, werden als mögliche Replay-Attacke verworfen[cite: 9].

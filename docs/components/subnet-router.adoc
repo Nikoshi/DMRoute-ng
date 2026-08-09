@@ -22,3 +22,10 @@ Die mathematische Zuordnung eines Ziels zu einem Haushalt erfolgt in konstanter 
 Das anschließende Filtern der aktiven Repeater-Liste (via Zero-Allocation `ReadOnlySpan`) erfolgt linear zur Anzahl der eingeloggten Repeater im Netzwerk ($O(N)$), wobei der Matching-Vergleich pro Repeater wiederum in $O(1)$ erfolgt.
 
 Dies ermöglicht ein nahtloses Roaming: Sobald sich ein Repeater in einem Subnetz anmeldet, empfängt er automatisch den Traffic seines Haushalts, ohne dass serverseitig explizite Routing-Tabellen aktualisiert werden müssen.
+
+== Mesh-Routing & Roaming
+Das reine Subnetz-Routing wurde um Mesh-Roaming erweitert, um netzwerkübergreifende Erreichbarkeit zu gewährleisten.
+
+* **Gäste-Erfassung:** Fremde IDs werden dynamisch erkannt (`TrackLocalGuest`) und deren Home-Zone via Mesh über ein `ROAM`-Update informiert.
+* **Private Calls (Unit Calls):** Der Router prüft zuerst die lokale Gast-Registry. Ist das Ziel lokal unbekannt, wird die aktuelle Aufenthalts-Zone über die `RoamingRegistry` ermittelt und das Paket gezielt ins Mesh an den zuständigen Master geroutet.
+* **Group Calls:** Werden abhängig von der Ziel-ID ins Mesh geflutet (z. B. TG 1 an alle bekannten Master, TG 100-999 an explizite Zonen).

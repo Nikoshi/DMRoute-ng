@@ -4,7 +4,7 @@
 Verwaltung des Repeater-Zustands, der Homebrew-Authentifizierungsdaten (Challenge/Response) und der Stations-Konfiguration.
 
 == Zustandsmaschine (RepeaterState)
-* `ChallengeSent`: Zufallszahl (`RandomNumber`) an Repeater gesendet; wartet auf HMAC-MD5-Antwort.
+* `ChallengeSent`: Zufallszahl (`RandomNumber`) an Repeater gesendet; wartet auf SHA-256-Antwort.
 * `LoggedIn`: Authentifizierung erfolgreich; Repeater ist im Routing aktiv.
 * `Disconnected`: Verbindung getrennt oder Timeout überschritten.
 

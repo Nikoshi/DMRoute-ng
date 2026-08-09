@@ -3,5 +3,7 @@
   &lt;TestAncestor&gt;
     &lt;TestId&gt;xUnit::B5809292-F561-4CDE-A826-76B421740E48::net9.0::DMRoute_ng.Tests.RepeaterRegistryTests&lt;/TestId&gt;
     &lt;TestId&gt;xUnit::B5809292-F561-4CDE-A826-76B421740E48::net9.0::DMRoute_ng.Tests.AuthenticationTests&lt;/TestId&gt;
+    &lt;TestId&gt;xUnit::B5809292-F561-4CDE-A826-76B421740E48::net9.0::DMRoute_ng.Tests.TimeoutAndReconnectTests&lt;/TestId&gt;
+    &lt;TestId&gt;xUnit::B5809292-F561-4CDE-A826-76B421740E48::net9.0::DMRoute_ng.Tests.MeshProtocolTests&lt;/TestId&gt;
   &lt;/TestAncestor&gt;
 &lt;/SessionState&gt;</s:String></wpf:ResourceDictionary>
