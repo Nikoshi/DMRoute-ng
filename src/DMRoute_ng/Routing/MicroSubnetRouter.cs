@@ -53,8 +53,8 @@ public class MicroSubnetRouter
         var isDataFrame = (packet[15] & 0x20) != 0; 
         var dataType = (byte)(bits & 0x0F);
         
-        bool isLocalOrigin = _registry.TryGet(repeaterId, out var sourceRepeater) && sourceRepeater.State == RepeaterState.LoggedIn;
-        bool isMeshOrigin = false;
+        var isLocalOrigin = _registry.TryGet(repeaterId, out var sourceRepeater) && sourceRepeater.State == RepeaterState.LoggedIn;
+        var isMeshOrigin = false;
 
         if (!isLocalOrigin)
         {
@@ -70,7 +70,7 @@ public class MicroSubnetRouter
         // Herkunft verarbeiten & Roaming triggern
         if (isLocalOrigin)
         {
-            int sourceHomeZone = srcId / 100;
+            var sourceHomeZone = srcId / 100;
             
             if (sourceHomeZone == _masterZoneId)
             {
@@ -79,12 +79,13 @@ public class MicroSubnetRouter
             else
             {
                 _roamingRegistry.TrackLocalGuest(srcId, sourceRepeater!.EndPoint!);
+                _logger.LogInformation("DEBUG: Gast erkannt! SrcId: {SrcId}, Berechnete Home-Zone: {Zone}, DataType: {Type}", srcId, sourceHomeZone, dataType);
 
                 if (dataType == 0x01 || dataType == 0x03)
                 {
                     if (_masterRegistry.TryGet(sourceHomeZone, out var homeMaster))
                     {
-                        _ = _meshService.SendLocationUpdateAsync(srcId, homeMaster.DataEndPoint);
+                        _ = _meshService.SendLocationUpdateAsync(srcId, homeMaster.DataEndPoint.Address);
                     }
                 }
             }

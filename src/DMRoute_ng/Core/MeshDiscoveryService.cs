@@ -79,9 +79,11 @@ public sealed class MeshDiscoveryService : BackgroundService
         }
     }
 
-    public async Task SendLocationUpdateAsync(int deviceId, IPEndPoint homeMasterEndpoint)
+    public async Task SendLocationUpdateAsync(int deviceId, IPAddress targetAddress)
     {
-        // 52 Bytes Payload: [ROAM (4)] [DeviceId (4)] [CurrentZone (4)] [Ticks (8)] [HMAC (32)]
+        // Wir senden explizit an den Mesh-/Discovery-Port, nicht an den DMR-Port!
+        var targetEndpoint = new IPEndPoint(targetAddress, _discoveryPort);
+
         var packet = new byte[52];
         "ROAM"u8.ToArray().CopyTo(packet, 0);
         BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(4, 4), deviceId);
@@ -92,11 +94,12 @@ public sealed class MeshDiscoveryService : BackgroundService
 
         try
         {
-            await _socket.SendToAsync(packet, SocketFlags.None, homeMasterEndpoint);
+            await _socket.SendToAsync(packet, SocketFlags.None, targetEndpoint);
+            _logger.LogDebug("ROAM Update für {DeviceId} an {Endpoint} gesendet.", deviceId, targetEndpoint);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fehler beim Senden des ROAM-Updates an {Endpoint}", homeMasterEndpoint);
+            _logger.LogError(ex, "Fehler beim Senden des ROAM-Updates");
         }
     }
 
