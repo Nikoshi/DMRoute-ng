@@ -70,6 +70,17 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         {
             HandleRptc(payload, remoteEndPoint);
         }
+        else if (payload.StartsWith(PacketUtils.DmrcHeader))
+        {
+            if (payload.Length >= 8)
+            {
+                var repId = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(4, 4));
+                logger.LogInformation("<-- DMRC (Hotspot Config Update) von ID {RepeaterId}", repId);
+                
+                // Hotspot beruhigen, indem wir die Konfiguration mit einem ACK abwinken
+                SendTo(PacketUtils.BuildRptAck((uint)repId), remoteEndPoint);
+            }
+        }
     }
 
     private void HandleRptl(ReadOnlySpan<byte> payload, IPEndPoint endPoint)

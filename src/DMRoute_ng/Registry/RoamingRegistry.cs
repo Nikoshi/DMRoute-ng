@@ -26,17 +26,30 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
 
     public void UpdateDeviceLocation(int deviceId, int foreignZoneId)
     {
+        bool isNewOrChanged = false;
+
         _roamingHomeDevices.AddOrUpdate(
             deviceId,
-            id => new ForeignDeviceEntry(id, foreignZoneId),
+            id => 
+            {
+                isNewOrChanged = true;
+                return new ForeignDeviceEntry(id, foreignZoneId);
+            },
             (id, entry) =>
             {
+                if (entry.CurrentZoneId != foreignZoneId)
+                {
+                    isNewOrChanged = true;
+                }
                 entry.CurrentZoneId = foreignZoneId;
                 Volatile.Write(ref entry.LastSeenTicks, DateTime.UtcNow.Ticks);
                 return entry;
             });
         
-        logger.LogInformation("Roaming: Heimat-Gerät {DeviceId} roamt in Zone {ZoneId}", deviceId, foreignZoneId);
+        if (isNewOrChanged)
+        {
+            logger.LogInformation("Roaming: Heimat-Gerät {DeviceId} roamt in Zone {ZoneId}", deviceId, foreignZoneId);
+        }
     }
 
     public bool TryGetRoamedDeviceZone(int deviceId, out int foreignZoneId)

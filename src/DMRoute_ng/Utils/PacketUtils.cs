@@ -9,6 +9,7 @@ public static class PacketUtils
     public static ReadOnlySpan<byte> RptkHeader => "RPTK"u8;
     public static ReadOnlySpan<byte> RptPingHeader => "RPTPING"u8;
     public static ReadOnlySpan<byte> DmrdHeader => "DMRD"u8;
+    public static ReadOnlySpan<byte> DmrcHeader => "DMRC"u8;
     public static ReadOnlySpan<byte> RptcHeader => "RPTC"u8;
     
     // Master Discovery Protocol
