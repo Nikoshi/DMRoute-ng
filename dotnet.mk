@@ -56,12 +56,6 @@ list:
 restore:
 	dotnet restore
 
-ifdef USE_KAITAI
-force-gen: $(GEN_FILES)
-	mkdir -p Packets
-	kaitai-struct-compiler $(GEN_FILES) --outdir $(GEN_FOLDER)/ --target csharp --dotnet-namespace $(GEN_NAMESPACE)
-endif
-
 clean:
 	dotnet clean
 	rm -f ${DOCKER_IMAGE_NAME}-${DOCKER_IMAGE_TAG}.tar

@@ -121,7 +121,7 @@ public class MicroSubnetRouter
                     // Fehler-Log nur noch bei Rufaufbau (0x01) oder CSBK (0x03) verhindern Spam
                     if (dataType == 0x01 || dataType == 0x03)
                     {
-                        _logger.LogWarning("Lokales Ziel {DstId} unbekannt.", dstId);
+                        _logger.LogWarning("Lokales Ziel {DstId} unbekannt", dstId);
                     }
                 }
             }
@@ -143,7 +143,7 @@ public class MicroSubnetRouter
                 {
                     if (dataType == 0x01 || dataType == 0x03)
                     {
-                        _logger.LogDebug("Ziel {DstId} (Zone {TargetZone}) unbekannt oder offline.", dstId, targetZoneId);
+                        _logger.LogDebug("Ziel {DstId} (Zone {TargetZone}) unbekannt oder offline", dstId, targetZoneId);
                     }
                 }
             }

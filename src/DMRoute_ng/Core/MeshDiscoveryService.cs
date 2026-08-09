@@ -39,7 +39,7 @@ public sealed class MeshDiscoveryService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Mesh: Discovery Service für Zone {Zone} auf UDP {Port} gestartet.", _myZoneId, _discoveryPort);
+        _logger.LogInformation("Mesh: Discovery Service für Zone {Zone} auf UDP {Port} gestartet", _myZoneId, _discoveryPort);
 
         // Starte den Broadcast-Sender als entkoppelten Task
         _ = Task.Run(() => BroadcastLoopAsync(stoppingToken), stoppingToken);
@@ -56,7 +56,7 @@ public sealed class MeshDiscoveryService : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Fehler beim Empfang eines Mesh-Beacons.");
+                _logger.LogError(ex, "Fehler beim Empfang eines Mesh-Beacons");
             }
         }
     }
@@ -100,7 +100,7 @@ public sealed class MeshDiscoveryService : BackgroundService
         var beaconTime = new DateTime(remoteTicks, DateTimeKind.Utc);
         if (Math.Abs((DateTime.UtcNow - beaconTime).TotalSeconds) > 30)
         {
-            _logger.LogDebug("Mesh: Asynchroner/Veralteter Beacon von Zone {Zone} ({IP}) abgelehnt.", remoteZone, remote.Address);
+            _logger.LogDebug("Mesh: Asynchroner/Veralteter Beacon von Zone {Zone} ({IP}) abgelehnt", remoteZone, remote.Address);
             return;
         }
 
