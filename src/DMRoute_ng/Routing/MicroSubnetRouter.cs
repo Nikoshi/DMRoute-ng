@@ -23,6 +23,7 @@ public class MicroSubnetRouter
     public event Action<byte[], string>? OnDataFrameReceived;
     public event Action<int, int, bool, byte>? OnSignalingReceived;
     public event Action<byte[], int, byte>? OnUnknownFrameReceived;
+    public event Action<int, byte[]>? OnAprsReceived;
 
     public MicroSubnetRouter(
         ILogger<MicroSubnetRouter> logger, 
@@ -209,8 +210,17 @@ public class MicroSubnetRouter
                 break;
             }
             case 0x03:
-                _logger.LogDebug("CSBK: Signalisierung von {SrcId} an {DstId}", srcId, dstId);
-                OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+                if (dstId == 990099)
+                {
+                    _logger.LogInformation("APRS CSBK-Positionsdaten von {SrcId} empfangen", srcId);
+                    // Raw Packet übergeben, Parsing erfolgt später
+                    OnAprsReceived?.Invoke(srcId, [.. packet]);
+                }
+                else
+                {
+                    _logger.LogDebug("CSBK: Signalisierung von {SrcId} an {DstId}", srcId, dstId);
+                    OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+                }
                 break;
             case 0x00:
             case 0x04:

@@ -11,9 +11,11 @@ public class SdsGateway
     private readonly ILogger<SdsGateway> _logger;
     private const byte FallbackColorCode = 1;
 
-    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, List<byte> Buffer)> _messageBuffers = new();
+    // Tuple um dstId erweitert
+    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, List<byte> Buffer)> _messageBuffers = new();
 
-    public event Action<int, string>? OnSmsReceived;
+    // Event um Ziel-ID erweitert
+    public event Action<int, int, string>? OnSmsReceived;
     
     public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router)
     {
@@ -26,10 +28,9 @@ public class SdsGateway
         if (packet.Length < 53) return;
 
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
+        var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10]; // Neu: Ziel-ID auslesen
         var dataType = (byte)(packet[15] & 0x0F);
         
-        // 0x06 = Data Header, 0x07 = 1/2 Rate Data, 0x08 = 3/4 Rate Data
-        // Ignoriere jegliche Voice/Signalisierungs-Daten rigoros (ohne Log), da sie nun im Router abgehandelt werden
         if (dataType < 0x06 || dataType > 0x08) return;
 
         var payload = packet.AsSpan(20, 33);
@@ -39,7 +40,7 @@ public class SdsGateway
             Span<byte> decodedHeader = stackalloc byte[12];
             Bptc19696.Decode(payload, decodedHeader);
             var expectedBlocks = decodedHeader[8] & 0x7F;
-            _messageBuffers[srcId] = (expectedBlocks, []);
+            _messageBuffers[srcId] = (expectedBlocks, dstId, []); // Speichern
         }
         else if (dataType is 0x07 or 0x08) 
         {
@@ -83,15 +84,12 @@ public class SdsGateway
                         
                         if (textLength > 0)
                         {
-                            var text = Encoding.Unicode.GetString(fullMessage, textOffset, textLength).TrimEnd('\0');
+                            // Fix: UTF-8 Dekodierung (deckt ASCII ab, verhindert Zeichensalat bei 8-Bit SMS)
+                            var text = Encoding.UTF8.GetString(fullMessage, textOffset, textLength).TrimEnd('\0');
                             if (!string.IsNullOrWhiteSpace(text)) 
                             {
-                                _logger.LogInformation("SMS von {SrcId}: {Text}", srcId, text);
-                                if (!string.IsNullOrWhiteSpace(text)) 
-                                {
-                                    _logger.LogInformation("SMS von {SrcId}: {Text}", srcId, text);
-                                    OnSmsReceived?.Invoke(srcId, text);
-                                }
+                                _logger.LogInformation("SMS von {SrcId} an {DstId}: {Text}", srcId, session.DstId, text);
+                                OnSmsReceived?.Invoke(srcId, session.DstId, text);
                             }
                         }
                     }

@@ -1,0 +1,48 @@
+= MqttIntegrationService & Telemetrie
+:toc:
+:sectnums:
+
+== Übersicht
+Der `MqttIntegrationService` ist ein Background-Worker, der den Zustand des Netzwerks (Topologie) und Echtzeit-Ereignisse (Anrufe, SMS) asynchron und allokationsfrei über einen MQTT-Broker publiziert.
+
+== Architektur & Performance
+Die Anbindung an den `MicroSubnetRouter` und das `SdsGateway` erfolgt über entkoppelte In-Memory-Kanäle (`System.Threading.Channels`). Dies stellt sicher, dass Netzwerklatenzen beim MQTT-Publishing den zeitkritischen UDP-Receive-Loop für Sprachdaten niemals blockieren. Die JSON-Serialisierung erfolgt über einen `JsonSpanBuilder` mit exakt 0 Bytes Heap-Allokation im Hot-Path.
+
+== MQTT Topic-Baum (Struktur & Status)
+Der Basis-Pfad lautet `dmroute/{zoneId}/`.
+
+=== 1. System & Infrastruktur (Retained, Polled)
+Zustandsdaten, die periodisch (z.B. alle 10 Sekunden) als Persistenz-Nachricht auf dem Broker aktualisiert werden.
+
+* `sys/info`: Allgemeine Metriken (z. B. Anzahl aktiver Hotspots).
+-> *Status: Implementiert*
+* `routing/hotspots`: Liste aller Repeater inkl. RPTC-Metadaten (Callsign, Software, TX-Power, Inaktivität).
+-> *Status: Bugfix ausstehend (Offset-Korrektur für Fixed-Length Structs)*
+* `routing/mesh/peers`: Liste der über WireGuard/UDP verbundenen Zonen-Master.
+-> *Status: Implementiert*
+* `routing/roaming/guests`: Fremde IDs im eigenen Netz.
+-> *Status: Ausstehend*
+* `routing/roaming/away`: Eigene IDs in fremden Netzen.
+-> *Status: Ausstehend*
+
+=== 2. Echtzeit-Kommunikation (Event-Driven)
+Gefeuert durch Signalisierungs-Header (DMRD).
+
+* `call/group/{dstId}/active`: Start eines Gruppenrufs.
+-> *Status: Implementiert. (To-Do: Timeout/Status-Tracking hinzufügen, um unsauber beendete Calls korrekt als "beendet" zu markieren).*
+* `call/group/{dstId}/event`: Ende eines Gruppenrufs inkl. Historie.
+-> *Status: Implementiert*
+* `call/private/{dstId}/active`: Start eines Privatrufs.
+-> *Status: Implementiert*
+* `call/private/{dstId}/event`: Ende eines Privatrufs.
+-> *Status: Implementiert*
+
+=== 3. Daten-Dienste & Diagnose (Event-Driven)
+Gefeuert durch den SDS-Decoder oder den Fallback-Zweig des Routers.
+
+* `sds/sms`: Dekodierte Textnachrichten (enthält `srcId`, `dstId` und `message`).
+-> *Status: Bugfix ausstehend (Dynamisches UTF-16LE / UTF-8 Encoding).*
+* `sds/aprs`: Extrahierte APRS-Positionsdaten aus CSBK-Frames (ID 990099).
+-> *Status: Parsing ausstehend.*
+* `diag/unknown_frame`: Hex-Dump nicht verarbeiteter DMR-Protokolldaten für Reverse Engineering.
+-> *Status: Implementiert*
