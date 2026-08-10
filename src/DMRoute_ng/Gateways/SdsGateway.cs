@@ -13,6 +13,8 @@ public class SdsGateway
 
     private readonly ConcurrentDictionary<int, (int ExpectedBlocks, List<byte> Buffer)> _messageBuffers = new();
 
+    public event Action<int, string>? OnSmsReceived;
+    
     public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router)
     {
         _logger = logger;
@@ -85,6 +87,11 @@ public class SdsGateway
                             if (!string.IsNullOrWhiteSpace(text)) 
                             {
                                 _logger.LogInformation("SMS von {SrcId}: {Text}", srcId, text);
+                                if (!string.IsNullOrWhiteSpace(text)) 
+                                {
+                                    _logger.LogInformation("SMS von {SrcId}: {Text}", srcId, text);
+                                    OnSmsReceived?.Invoke(srcId, text);
+                                }
                             }
                         }
                     }

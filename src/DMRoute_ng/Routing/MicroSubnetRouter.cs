@@ -22,6 +22,7 @@ public class MicroSubnetRouter
 
     public event Action<byte[], string>? OnDataFrameReceived;
     public event Action<int, int, bool, byte>? OnSignalingReceived;
+    public event Action<byte[], int, byte>? OnUnknownFrameReceived;
 
     public MicroSubnetRouter(
         ILogger<MicroSubnetRouter> logger, 
@@ -97,7 +98,7 @@ public class MicroSubnetRouter
             }
         }
 
-        HandleSignaling(srcId, dstId, isGroupCall, dataType);
+        HandleSignaling(packet, srcId, dstId, isGroupCall, dataType);
 
         if (isDataFrame)
         {
@@ -187,7 +188,7 @@ public class MicroSubnetRouter
         }
     }
 
-    private void HandleSignaling(int srcId, int dstId, bool isGroupCall, byte dataType)
+    private void HandleSignaling(ReadOnlySpan<byte> packet, int srcId, int dstId, bool isGroupCall, byte dataType)
     {
         switch (dataType)
         {
@@ -205,7 +206,6 @@ public class MicroSubnetRouter
                     _logger.LogInformation("ENDE:  {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
                     OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
                 }
-
                 break;
             }
             case 0x03:
@@ -213,14 +213,21 @@ public class MicroSubnetRouter
                 OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
                 break;
             case 0x00:
-            {
+            case 0x04:
+            case 0x05:
+            case 0x06:
+            case 0x07:
+            case 0x08:
+                // Bekannte Voice- und SDS-Daten-Datentypen (0x00 bis 0x08) -> Ignorieren für Unknown Dump
                 if (_activeCalls.ContainsKey(srcId))
                 {
                     _activeCalls[srcId] = DateTime.UtcNow.Ticks;
                 }
-
                 break;
-            }
+            default:
+                // Nur echte, völlig unbekannte Protokoll-Erweiterungen dumpen
+                OnUnknownFrameReceived?.Invoke([.. packet], srcId, dataType);
+                break;
         }
     }
 }

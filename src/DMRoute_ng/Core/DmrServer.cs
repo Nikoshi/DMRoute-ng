@@ -172,31 +172,63 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
     }
 
     private void HandleRptc(ReadOnlySpan<byte> payload, IPEndPoint endPoint)
+{
+    var isRptcl = payload.Length >= 5 && payload[4] == 0x4C;
+    var offset = isRptcl ? 5 : 4; 
+    
+    if (payload.Length < offset + 4) return;
+    
+    var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(offset, 4));
+
+    if (!registry.TryGet(repeaterId, out var repeater)) return;
+
+    if (isRptcl)
     {
-        var isRptcl = payload.Length >= 5 && payload[4] == 0x4C;
-        var offset = isRptcl ? 5 : 4; 
-        
-        if (payload.Length < offset + 4) return;
-        
-        var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(offset, 4));
-
-        if (!registry.TryGet(repeaterId, out var repeater)) return;
-
-        if (isRptcl)
-        {
-            logger.LogInformation("<-- RPTCL (Disconnect) von ID {RepeaterId}", repeaterId);
-            repeater.State = RepeaterState.Disconnected;
-            Volatile.Write(ref repeater.LastPingTicks, 0);
-        }
-        else
-        {
-            Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
-            logger.LogInformation("<-- RPTC (Config) von ID {RepeaterId}", repeaterId);
-            logger.LogInformation("--> RPTACK (Config bestätigt für {RepeaterId})", repeaterId);
-            
-            SendTo(PacketUtils.BuildRptAck((uint)repeaterId), repeater.EndPoint ?? endPoint);
-        }
+        logger.LogInformation("<-- RPTCL (Disconnect) von ID {RepeaterId}", repeaterId);
+        repeater.State = RepeaterState.Disconnected;
+        Volatile.Write(ref repeater.LastPingTicks, 0);
     }
+    else
+    {
+        Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
+        logger.LogInformation("<-- RPTC (Config) von ID {RepeaterId}", repeaterId);
+        
+        // RPTC Metadaten parsen (Payload ab nach der ID)
+        var configPayload = payload.Slice(offset + 4);
+        if (!configPayload.IsEmpty)
+        {
+            try
+            {
+                var callsign = ReadNextString(ref configPayload);
+                var rxFreq = ReadNextString(ref configPayload);
+                var txFreq = ReadNextString(ref configPayload);
+                _ = int.TryParse(ReadNextString(ref configPayload), out var txPower);
+                _ = int.TryParse(ReadNextString(ref configPayload), out var colorCode);
+                _ = float.TryParse(ReadNextString(ref configPayload), System.Globalization.CultureInfo.InvariantCulture, out var lat);
+                _ = float.TryParse(ReadNextString(ref configPayload), System.Globalization.CultureInfo.InvariantCulture, out var lon);
+                _ = int.TryParse(ReadNextString(ref configPayload), out var height);
+                var loc = ReadNextString(ref configPayload);
+                var desc = ReadNextString(ref configPayload);
+                var url = ReadNextString(ref configPayload);
+                var software = ReadNextString(ref configPayload);
+                var package = ReadNextString(ref configPayload);
+
+                repeater.Configuration = new RepeaterConfiguration(
+                    callsign, rxFreq, txFreq, txPower, colorCode, lat, lon, height, loc, desc, url, software, package
+                );
+                
+                logger.LogDebug("RPTC Metadaten für {Id} aktualisiert: {Callsign} / {Software}", repeaterId, callsign, software);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Fehler beim Parsen der RPTC-Metadaten für Repeater {Id}", repeaterId);
+            }
+        }
+
+        logger.LogInformation("--> RPTACK (Config bestätigt für {RepeaterId})", repeaterId);
+        SendTo(PacketUtils.BuildRptAck((uint)repeaterId), repeater.EndPoint ?? endPoint);
+    }
+}
 
     // Zero-Allocation SendTo Implementierung für das IDmrSender Interface
     public void SendTo(ReadOnlySpan<byte> data, IPEndPoint endPoint)
@@ -210,6 +242,27 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         catch (Exception ex)
         {
             logger.LogError(ex, "Fehler beim Senden an {Endpoint}", endPoint);
+        }
+    }
+    
+    private static string ReadNextString(ref ReadOnlySpan<byte> buffer)
+    {
+        if (buffer.IsEmpty) return string.Empty;
+    
+        var nullIdx = buffer.IndexOf((byte)0);
+        if (nullIdx == -1)
+        {
+            // Fallback: Kein Null-Byte gefunden, nimm den Rest
+            var str = Encoding.ASCII.GetString(buffer);
+            buffer = default;
+            return str;
+        }
+        else
+        {
+            var str = Encoding.ASCII.GetString(buffer[..nullIdx]);
+            // Slice den Puffer weiter (+1 um das Null-Byte zu überspringen)
+            buffer = buffer[(nullIdx + 1)..];
+            return str;
         }
     }
 }

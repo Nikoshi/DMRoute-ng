@@ -1,5 +1,6 @@
 ﻿using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
+using DMRoute_ng.Integration; // NEU
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using DMRoute_ng.Registry;
@@ -9,6 +10,14 @@ using Microsoft.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
+
+// Fail-Fast: MQTT Konfiguration prüfen
+var mqttHost = builder.Configuration.GetValue<string>("Mqtt:Host");
+if (string.IsNullOrWhiteSpace(mqttHost))
+{
+    Console.Error.WriteLine("FATAL ERROR: MQTT Broker Host (Mqtt:Host) ist nicht konfiguriert! Beende...");
+    Environment.Exit(1);
+}
 
 var myZoneId = builder.Configuration.GetValue("ZoneId", 100);
 var meshPsk = builder.Configuration.GetValue<string>("MeshPsk", "s3cr37m3sh");
@@ -51,6 +60,9 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddHostedService<DmrServer>();
 builder.Services.AddSingleton<SdsGateway>();
+
+// NEU: MQTT Integration Service registrieren
+builder.Services.AddHostedService<MqttIntegrationService>();
 
 var host = builder.Build();
 host.Services.GetRequiredService<SdsGateway>();
