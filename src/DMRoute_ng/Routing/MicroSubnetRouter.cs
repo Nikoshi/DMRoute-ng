@@ -8,8 +8,17 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Routing;
 
+
 public class MicroSubnetRouter
 {
+    private readonly struct CallState(int dstId, bool isGroupCall, long ticks, bool pendingTermination = false)
+    {
+        public readonly int DstId = dstId;
+        public readonly bool IsGroupCall = isGroupCall;
+        public readonly long Ticks = ticks;
+        public readonly bool PendingTermination = pendingTermination;
+    }
+    
     private readonly ILogger<MicroSubnetRouter> _logger;
     private readonly RepeaterRegistry _registry;
     private readonly MasterRegistry _masterRegistry;
@@ -18,7 +27,8 @@ public class MicroSubnetRouter
     private readonly int _masterZoneId;
 
     private readonly ConcurrentDictionary<int, int> _localDeviceRouting = new();
-    private readonly ConcurrentDictionary<int, long> _activeCalls = new();
+    private readonly ConcurrentDictionary<int, CallState> _activeCalls = new();
+    private readonly Timer _cleanupTimer;
 
     public event Action<byte[], string>? OnDataFrameReceived;
     public event Action<int, int, bool, byte>? OnSignalingReceived;
@@ -39,6 +49,7 @@ public class MicroSubnetRouter
         _roamingRegistry = roamingRegistry;
         _meshService = meshService;
         _masterZoneId = masterZoneId;
+        _cleanupTimer = new Timer(CleanupStaleCalls, null, 2000, 2000);
     }
 
     public void RouteDmrd(ReadOnlySpan<byte> packet, IPEndPoint remoteEndPoint, IDmrSender sender)
@@ -193,22 +204,29 @@ public class MicroSubnetRouter
     {
         switch (dataType)
         {
-            case 0x01 when _activeCalls.TryAdd(srcId, DateTime.UtcNow.Ticks):
-                _logger.LogInformation("START: {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
-                OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
-                break;
             case 0x01:
-                _activeCalls[srcId] = DateTime.UtcNow.Ticks;
-                break;
-            case 0x02:
-            {
-                if (_activeCalls.TryRemove(srcId, out _))
+                // Falls der Ruf bereits aktiv war (oder in der Hang-Time schwebte), Re-Activeren ohne neues START-Event
+                if (_activeCalls.TryGetValue(srcId, out var existingCall))
                 {
-                    _logger.LogInformation("ENDE:  {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
-                    OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+                    _activeCalls[srcId] = new CallState(dstId, isGroupCall, DateTime.UtcNow.Ticks, pendingTermination: false);
+                }
+                else
+                {
+                    if (_activeCalls.TryAdd(srcId, new CallState(dstId, isGroupCall, DateTime.UtcNow.Ticks, pendingTermination: false)))
+                    {
+                        _logger.LogInformation("START: {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
+                        OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+                    }
                 }
                 break;
-            }
+
+            case 0x02:
+                // Statt sofort zu löschen, setzen wir den Ruf auf "PendingTermination"
+                if (_activeCalls.TryGetValue(srcId, out var active))
+                {
+                    _activeCalls[srcId] = new CallState(active.DstId, active.IsGroupCall, DateTime.UtcNow.Ticks, pendingTermination: true);
+                }
+                break;
             case 0x03:
                 if (dstId == 990099)
                 {
@@ -228,16 +246,49 @@ public class MicroSubnetRouter
             case 0x06:
             case 0x07:
             case 0x08:
-                // Bekannte Voice- und SDS-Daten-Datentypen (0x00 bis 0x08) -> Ignorieren für Unknown Dump
-                if (_activeCalls.ContainsKey(srcId))
+                // Audio-Burst empfangen: Zeitstempel erneuern und eventuelle Hang-Time aufheben
+                if (_activeCalls.TryGetValue(srcId, out var current))
                 {
-                    _activeCalls[srcId] = DateTime.UtcNow.Ticks;
+                    _activeCalls[srcId] = new CallState(current.DstId, current.IsGroupCall, DateTime.UtcNow.Ticks, pendingTermination: false);
                 }
                 break;
             default:
-                // Nur echte, völlig unbekannte Protokoll-Erweiterungen dumpen
                 OnUnknownFrameReceived?.Invoke([.. packet], srcId, dataType);
                 break;
+        }
+    }
+    
+    private void CleanupStaleCalls(object? state)
+    {
+        long currentTicks = DateTime.UtcNow.Ticks;
+        // Timeout für echte Inaktivität (3s) und Hang-Time für PTT-Release (1.5s)
+        long timeoutTicks = TimeSpan.FromSeconds(3).Ticks;
+        long hangtimeTicks = TimeSpan.FromMilliseconds(1500).Ticks;
+
+        foreach (var kvp in _activeCalls)
+        {
+            var call = kvp.Value;
+            long elapsed = currentTicks - call.Ticks;
+
+            // Fall 1: Ruf wurde per 0x02 als beendet markiert und die Hang-Time ist abgelaufen
+            if (call.PendingTermination && elapsed > hangtimeTicks)
+            {
+                if (_activeCalls.TryRemove(kvp.Key, out var removed))
+                {
+                    _logger.LogInformation("ENDE:  {CallType} von {SrcId} an {DstId} (sauber beendet)", 
+                        removed.IsGroupCall ? "GroupCall" : "PrivateCall", kvp.Key, removed.DstId);
+                    OnSignalingReceived?.Invoke(kvp.Key, removed.DstId, removed.IsGroupCall, 0x02);
+                }
+            }
+            // Fall 2: Keine Pakete mehr empfangen (Verbindungsabbruch / Timeout)
+            else if (!call.PendingTermination && elapsed > timeoutTicks)
+            {
+                if (_activeCalls.TryRemove(kvp.Key, out var removed))
+                {
+                    _logger.LogWarning("TIMEOUT: Call von {SrcId} an {DstId} wegen Inaktivität abgebrochen", kvp.Key, removed.DstId);
+                    OnSignalingReceived?.Invoke(kvp.Key, removed.DstId, removed.IsGroupCall, 0xFE);
+                }
+            }
         }
     }
 }

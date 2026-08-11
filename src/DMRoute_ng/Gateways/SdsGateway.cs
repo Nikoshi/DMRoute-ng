@@ -12,11 +12,12 @@ public class SdsGateway
     private const byte FallbackColorCode = 1;
 
     // Tuple um dstId erweitert
-    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, List<byte> Buffer)> _messageBuffers = new();
+    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, List<byte> Buffer)> _messageBuffers =
+        new();
 
     // Event um Ziel-ID erweitert
     public event Action<int, int, string>? OnSmsReceived;
-    
+
     public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router)
     {
         _logger = logger;
@@ -30,39 +31,44 @@ public class SdsGateway
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10]; // Neu: Ziel-ID auslesen
         var dataType = (byte)(packet[15] & 0x0F);
-        
+
         if (dataType < 0x06 || dataType > 0x08) return;
 
         var payload = packet.AsSpan(20, 33);
 
-        if (dataType == 0x06) 
+        if (dataType == 0x06)
         {
-            Span<byte> decodedHeader = stackalloc byte[12];
-            Bptc19696.Decode(payload, decodedHeader);
-            var expectedBlocks = decodedHeader[8] & 0x7F;
-            _messageBuffers[srcId] = (expectedBlocks, dstId, []); // Speichern
+            // Neuer Sendeversuch: Alten unvollständigen Puffer für diese SrcId sofort verwerfen!
+            _messageBuffers.TryRemove(srcId, out _);
+
+            Span<byte> headerData = stackalloc byte[12];
+            Bptc19696.Decode(payload.Slice(0, 25), headerData);
+
+            var serviceOptions = headerData[0];
+            var isGroup = (serviceOptions & 0x80) != 0;
+            var blocks = (headerData[0] & 0x7F);
+
+            if (blocks > 0)
+            {
+                _messageBuffers[srcId] = (blocks, dstId, new List<byte>());
+            }
         }
-        else if (dataType is 0x07 or 0x08) 
+        else if (true)
         {
-            if (!_messageBuffers.TryGetValue(srcId, out var session)) return;
+            if (_messageBuffers.TryGetValue(srcId, out var session))
+            {
+                var blockSize = dataType == 0x07 ? 12 : 18;
+                Span<byte> decodedBlock = stackalloc byte[blockSize];
 
-            byte[] decodedBlock;
-            int blockSize;
+                if (dataType == 0x07)
+                {
+                    Bptc19696.Decode(payload.Slice(0, 25), decodedBlock);
+                }
+                else if (!DmrTrellis.Decode(payload.Slice(0, 25), decodedBlock))
+                {
+                    _logger.LogError("Trellis failed to decode!");
+                }
 
-            if (dataType == 0x07)
-            {
-                decodedBlock = DmrFecDecoder.Decode(payload, FallbackColorCode);
-                blockSize = 12;
-            }
-            else 
-            {
-                decodedBlock = new byte[18];
-                if (!DmrTrellis.Decode(payload, decodedBlock)) return;
-                blockSize = 18;
-            }
-        
-            lock (session.Buffer)
-            {
                 session.Buffer.AddRange(decodedBlock);
 
                 if (session.Buffer.Count >= session.ExpectedBlocks * blockSize)
@@ -70,29 +76,39 @@ public class SdsGateway
                     var fullMessage = session.Buffer.ToArray();
                     var ipOffset = -1;
 
-                    for (var i = 0; i < 4; i++)
+                    // FIX: Erhöhter Suchradius (bis zu 20 Bytes), um den IP-Header sicher zu finden
+                    var maxScan = Math.Min(20, fullMessage.Length - 1);
+                    for (var i = 0; i < maxScan; i++)
                     {
-                        if (fullMessage[i] != 0x45 || fullMessage[i + 1] != 0x00) continue;
-                        ipOffset = i;
-                        break;
+                        if (fullMessage[i] == 0x45 && fullMessage[i + 1] == 0x00)
+                        {
+                            ipOffset = i;
+                            break;
+                        }
                     }
 
                     if (ipOffset >= 0)
                     {
-                        var textOffset = ipOffset + (dataType == 0x07 ? 38 : 42); 
-                        var textLength = fullMessage.Length - textOffset - 4; 
-                        
-                        if (textLength > 0)
+                        var textOffset = ipOffset + (dataType == 0x07 ? 38 : 42);
+                        var textLength = fullMessage.Length - textOffset - 4;
+
+                        if (textLength > 0 && textOffset + textLength <= fullMessage.Length)
                         {
-                            // Fix: UTF-8 Dekodierung (deckt ASCII ab, verhindert Zeichensalat bei 8-Bit SMS)
-                            var text = Encoding.UTF8.GetString(fullMessage, textOffset, textLength).TrimEnd('\0');
-                            if (!string.IsNullOrWhiteSpace(text)) 
+                            bool isUtf16 = textLength >= 2 && fullMessage[textOffset + 1] == 0x00;
+
+                            var text = isUtf16
+                                ? Encoding.Unicode.GetString(fullMessage, textOffset, textLength).TrimEnd('\0')
+                                : Encoding.UTF8.GetString(fullMessage, textOffset, textLength).TrimEnd('\0');
+
+                            if (!string.IsNullOrWhiteSpace(text))
                             {
-                                _logger.LogInformation("SMS von {SrcId} an {DstId}: {Text}", srcId, session.DstId, text);
+                                _logger.LogInformation("SMS von {SrcId} an {DstId} (UTF16: {IsUtf16}): {Text}", srcId,
+                                    session.DstId, isUtf16, text);
                                 OnSmsReceived?.Invoke(srcId, session.DstId, text);
                             }
                         }
                     }
+
                     _messageBuffers.TryRemove(srcId, out _);
                 }
             }
