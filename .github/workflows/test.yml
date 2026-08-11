@@ -2,9 +2,9 @@ name: .NET Core Test & Coverage
 
 on:
   push:
-    branches: [ "main", "master" ]
+  # Führt den Workflow bei jedem Push auf einen beliebigen Branch aus
   pull_request:
-    branches: [ "main", "master" ]
+  # Führt den Workflow bei jedem Pull Request auf einen beliebigen Branch aus
 
 jobs:
   build-and-test:
