@@ -4,6 +4,7 @@ using System.Text;
 using DMRoute_ng.Coding;
 using Microsoft.Extensions.Logging;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Types;
 
 namespace DMRoute_ng.Gateways;
 
@@ -12,9 +13,9 @@ public class SdsGateway
     private readonly ILogger<SdsGateway> _logger;
     private const byte FallbackColorCode = 1;
 
-    // Tuple um dstId erweitert
-    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, List<byte> Buffer)> _messageBuffers =
-        new();
+    // Neues Flag 'bool IsConfirmedData' hinzugefügt
+    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, bool IsConfirmedData, List<byte> Buffer)>
+        _messageBuffers = new();
 
     // Event um Ziel-ID erweitert
     public event Action<int, int, string>? OnSmsReceived;
@@ -27,10 +28,8 @@ public class SdsGateway
 
     private void HandleDataFrame(byte[] packet, string sourceEndpoint)
     {
-        // 1. Minimum Size Check (53 Bytes DMRD Frame)
         if (packet.Length < 53) return;
 
-        // Src und Dst stehen praktischerweise in JEDEM MMDVM-Frame!
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
         var dataType = (byte)(packet[15] & 0x0F);
@@ -41,85 +40,75 @@ public class SdsGateway
 
         if (dataType == 0x06) // Text Header
         {
-            // Puffer hart zurücksetzen, ExpectedBlocks brauchen wir nicht mehr zwingend
-            _messageBuffers[srcId] = (ExpectedBlocks: 0, DstId: dstId, Buffer: new List<byte>());
+            _messageBuffers[srcId] =
+                (ExpectedBlocks: 0, DstId: dstId, IsConfirmedData: false, Buffer: new List<byte>());
         }
         else if (dataType is 0x07 or 0x08) // Data Blöcke
         {
-            // 🛠️ FALLBACK: Falls der 0x06 Header über RF verloren ging, 
-            // erstellen wir die Session einfach jetzt. (Da Src/Dst sowieso bekannt sind!)
-            if (!_messageBuffers.TryGetValue(srcId, out var session))
-            {
-                session = (ExpectedBlocks: 0, DstId: dstId, Buffer: new List<byte>());
-                _messageBuffers[srcId] = session;
-            }
-
             var blockSize = dataType == 0x07 ? 12 : 18;
             Span<byte> decodedData = stackalloc byte[blockSize];
 
-            if (dataType == 0x07)
+            if (dataType == 0x07) Bptc19696.Decode(payload, decodedData);
+            else if (!DmrTrellis.Decode(payload, decodedData)) return;
+
+            if (!_messageBuffers.TryGetValue(srcId, out var session))
             {
-                Bptc19696.Decode(payload, decodedData);
-            }
-            else
-            {
-                if (!DmrTrellis.Decode(payload, decodedData)) return;
+                int ipIdx = decodedData.IndexOf((byte)0x45);
+                if (ipIdx == -1) return; // Padding Block verwerfen
+
+                bool isConfirmed = ipIdx == 2;
+                session = (ExpectedBlocks: 0, DstId: dstId, IsConfirmedData: isConfirmed, Buffer: new List<byte>());
+                _messageBuffers[srcId] = session;
             }
 
-            // Dekodierte Daten in den Puffer schieben (mutiert die List<byte> im Dictionary)
-            session.Buffer.AddRange(decodedData);
+            if (session.Buffer.Count == 0 && decodedData.Length > 2 && decodedData[2] == 0x45)
+            {
+                session.IsConfirmedData = true;
+                _messageBuffers[srcId] = session;
+            }
+
+            var startIndex = session.IsConfirmedData ? 2 : 0;
+            for (int i = startIndex; i < decodedData.Length; i++)
+            {
+                session.Buffer.Add(decodedData[i]);
+            }
 
             var fullMessage = session.Buffer.ToArray();
-            
-// Konvertiert den Puffer allokationsfrei (bzw. extrem speicherschonend) direkt in Hex-Großbuchstaben
-            string hexLog = Convert.ToHexString(fullMessage);
+            var spanMessage = fullMessage.AsSpan();
 
-            _logger.LogInformation("DMR SDS Hex-Dump (Type {DataType:X2}, Length {Length}): {Hex}", 
-                dataType, fullMessage.Length, hexLog);
+            var ipOffset = spanMessage.IndexOf((byte)0x45);
 
-            
-            // 🔎 Suche den Start des IPv4-Headers (0x45)
-            var ipOffset = Array.IndexOf(fullMessage, (byte)0x45);
-
-            // Iteriere, falls 0x45 zufällig in einem Padding/CRC-Byte auftaucht
-            while (ipOffset != -1 && ipOffset + 4 <= fullMessage.Length)
+            while (ipOffset != -1)
             {
-                // Extrahiere die *wahre* Länge des IPv4-Pakets aus Byte 2 und 3
-                var ipLength = (fullMessage[ipOffset + 2] << 8) | fullMessage[ipOffset + 3];
+                var ipSpan = spanMessage.Slice(ipOffset);
+                var ipv4 = new Ipv4Packet(ipSpan);
 
-                // Plausibilitätscheck: IP (20) + UDP (8) + TMS Header (6) = mind. 34 Bytes
-                if (ipLength >= 34 && ipLength <= 500)
+                if (ipv4.IsValid)
                 {
-                    // 🔥 Der magische Moment: Haben wir genug Bytes gesammelt, um das IP-Paket zu füllen?
-                    if (fullMessage.Length >= ipOffset + ipLength)
+                    var udp = new UdpDatagram(ipv4.Payload);
+
+                    if (udp.IsValid && (udp.SourcePort == 4007 || udp.DestinationPort == 4007))
                     {
-                        _messageBuffers.TryRemove(srcId, out _); // Aufräumen
+                        var tms = new TmsMessage(udp.Payload);
 
-                        // Prüfen auf Motorola TMS Port (4007)
-                        var udpPort = (fullMessage[ipOffset + 22] << 8) | fullMessage[ipOffset + 23];
-                        if (udpPort == 4007)
+                        if (tms.IsValid)
                         {
-                            var udpPayloadOffset = ipOffset + 28;
-                            var encodingByte = fullMessage[udpPayloadOffset + 5];
-                            var textOffset = udpPayloadOffset + 6;
+                            _messageBuffers.TryRemove(srcId, out _);
 
-                            // Text-Länge ist exakt die IP-Länge minus alle IP/UDP/TMS Header (34 Bytes)
-                            // => Dadurch bleibt die 4-Byte DMR CRC am Ende komplett unangetastet!
-                            var textLength = ipLength - 34;
-
+                            var textLength = tms.TextBytes.Length;
                             if (textLength > 0)
                             {
-                                string text = string.Empty;
                                 try
                                 {
-                                    if (encodingByte == 0x04)
+                                    string text;
+                                    if (tms.EncodingByte == 0x04)
                                     {
                                         if (textLength % 2 != 0) textLength--;
-                                        text = Encoding.Unicode.GetString(fullMessage, textOffset, textLength);
+                                        text = Encoding.Unicode.GetString(tms.TextBytes.Slice(0, textLength));
                                     }
                                     else
                                     {
-                                        text = Encoding.UTF8.GetString(fullMessage, textOffset, textLength);
+                                        text = Encoding.UTF8.GetString(tms.TextBytes);
                                     }
 
                                     text = text.Trim('\0', '\r', '\n');
@@ -127,24 +116,32 @@ public class SdsGateway
                                     if (!string.IsNullOrWhiteSpace(text))
                                     {
                                         _logger.LogInformation("SMS von {SrcId} an {DstId} (Enc: 0x{Enc:X2}): {Text}",
-                                            srcId, session.DstId, encodingByte, text);
+                                            srcId, session.DstId, tms.EncodingByte, text);
                                         OnSmsReceived?.Invoke(srcId, session.DstId, text);
                                     }
                                 }
                                 catch (Exception ex)
                                 {
-                                    _logger.LogError(ex, "Fehler beim Dekodieren der SMS (Encoding-Byte: 0x{Enc:X2})",
-                                        encodingByte);
+                                    _logger.LogError(ex, "Fehler beim Dekodieren der SMS (Enc: 0x{Enc:X2})",
+                                        tms.EncodingByte);
                                 }
                             }
                         }
 
-                        return; // Erfolgreich verarbeitet, Methode verlassen!
+                        return;
                     }
                 }
 
-                // Falls es ein falsches 0x45 war, weitersuchen
-                ipOffset = Array.IndexOf(fullMessage, (byte)0x45, ipOffset + 1);
+                // Weitersuchen, falls 0x45 ein Fehlfund war
+                if (ipOffset + 1 < spanMessage.Length)
+                {
+                    var nextIdx = spanMessage.Slice(ipOffset + 1).IndexOf((byte)0x45);
+                    ipOffset = nextIdx == -1 ? -1 : ipOffset + 1 + nextIdx;
+                }
+                else
+                {
+                    ipOffset = -1;
+                }
             }
         }
     }
