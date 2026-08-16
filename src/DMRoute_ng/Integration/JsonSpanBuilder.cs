@@ -80,9 +80,20 @@ public ref struct JsonSpanBuilder
         }
         WriteByte((byte)'"');
     }
-
+    
+    // Optional, aber nützlich für bools
+    public void AppendBool(ReadOnlySpan<byte> key, bool value)
+    {
+        AppendKey(key);
+        ReadOnlySpan<byte> valSpan = value ? "true"u8 : "false"u8;
+        valSpan.CopyTo(_buffer.Slice(_offset));
+        _offset += valSpan.Length;
+    }
+    
     public void Finish()
     {
         WriteByte((byte)(_isArrayRoot ? ']' : '}'));
     }
+
+    
 }

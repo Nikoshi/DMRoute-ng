@@ -1,4 +1,5 @@
-﻿using DMRoute_ng.Core;
+﻿using System.Threading.Channels;
+using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
 using DMRoute_ng.Integration; // NEU
 using Microsoft.Extensions.DependencyInjection;
@@ -61,7 +62,20 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddHostedService<DmrServer>();
 builder.Services.AddSingleton<SdsGateway>();
 
-// NEU: MQTT Integration Service registrieren
+
+builder.Services.AddSingleton<RawMqttClient>(sp => 
+{
+    var clientId = System.Text.Encoding.UTF8.GetBytes($"dmroute_{myZoneId}_{Random.Shared.Next(1000, 9999)}");
+    return new RawMqttClient(clientId);
+});
+
+builder.Services.AddSingleton(Channel.CreateBounded<MqttEvent>(new BoundedChannelOptions(1000)
+{
+    SingleReader = true, 
+    SingleWriter = false, 
+    FullMode = BoundedChannelFullMode.DropOldest
+}));
+
 builder.Services.AddHostedService<MqttIntegrationService>();
 
 var host = builder.Build();

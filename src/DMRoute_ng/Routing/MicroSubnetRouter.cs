@@ -11,10 +11,11 @@ namespace DMRoute_ng.Routing;
 
 public class MicroSubnetRouter
 {
-    private readonly struct CallState(int dstId, bool isGroupCall, long ticks, bool pendingTermination = false)
+    private readonly struct CallState(int dstId, bool isGroupCall, long startTicks, long ticks, bool pendingTermination = false)
     {
         public readonly int DstId = dstId;
         public readonly bool IsGroupCall = isGroupCall;
+        public readonly long StartTicks = startTicks; // Neu
         public readonly long Ticks = ticks;
         public readonly bool PendingTermination = pendingTermination;
     }
@@ -31,7 +32,7 @@ public class MicroSubnetRouter
     private readonly Timer _cleanupTimer;
 
     public event Action<byte[], string>? OnDataFrameReceived;
-    public event Action<int, int, bool, byte>? OnSignalingReceived;
+    public event Action<int, int, bool, byte, int>? OnSignalingReceived;
     public event Action<byte[], int, byte>? OnUnknownFrameReceived;
     public event Action<int, byte[]>? OnAprsReceived;
 
@@ -202,29 +203,27 @@ public class MicroSubnetRouter
 
     private void HandleSignaling(ReadOnlySpan<byte> packet, int srcId, int dstId, bool isGroupCall, byte dataType)
     {
+        long now = DateTime.UtcNow.Ticks;
         switch (dataType)
         {
             case 0x01:
-                // Falls der Ruf bereits aktiv war (oder in der Hang-Time schwebte), Re-Activeren ohne neues START-Event
                 if (_activeCalls.TryGetValue(srcId, out var existingCall))
                 {
-                    _activeCalls[srcId] = new CallState(dstId, isGroupCall, DateTime.UtcNow.Ticks, pendingTermination: false);
+                    _activeCalls[srcId] = new CallState(dstId, isGroupCall, existingCall.StartTicks, now, pendingTermination: false);
                 }
                 else
                 {
-                    if (_activeCalls.TryAdd(srcId, new CallState(dstId, isGroupCall, DateTime.UtcNow.Ticks, pendingTermination: false)))
+                    if (_activeCalls.TryAdd(srcId, new CallState(dstId, isGroupCall, now, now, pendingTermination: false)))
                     {
                         _logger.LogInformation("START: {CallType} von {SrcId} an {DstId}", isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
-                        OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+                        OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType, 0);
                     }
                 }
                 break;
-
             case 0x02:
-                // Statt sofort zu löschen, setzen wir den Ruf auf "PendingTermination"
                 if (_activeCalls.TryGetValue(srcId, out var active))
                 {
-                    _activeCalls[srcId] = new CallState(active.DstId, active.IsGroupCall, DateTime.UtcNow.Ticks, pendingTermination: true);
+                    _activeCalls[srcId] = new CallState(active.DstId, active.IsGroupCall, active.StartTicks, now, pendingTermination: true);
                 }
                 break;
             case 0x03:
@@ -237,7 +236,7 @@ public class MicroSubnetRouter
                 else
                 {
                     _logger.LogDebug("CSBK: Signalisierung von {SrcId} an {DstId}", srcId, dstId);
-                    OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType);
+                    OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType, 0);
                 }
                 break;
             case 0x00:
@@ -246,10 +245,9 @@ public class MicroSubnetRouter
             case 0x06:
             case 0x07:
             case 0x08:
-                // Audio-Burst empfangen: Zeitstempel erneuern und eventuelle Hang-Time aufheben
                 if (_activeCalls.TryGetValue(srcId, out var current))
                 {
-                    _activeCalls[srcId] = new CallState(current.DstId, current.IsGroupCall, DateTime.UtcNow.Ticks, pendingTermination: false);
+                    _activeCalls[srcId] = new CallState(current.DstId, current.IsGroupCall, current.StartTicks, now, pendingTermination: false);
                 }
                 break;
             default:
@@ -261,32 +259,30 @@ public class MicroSubnetRouter
     private void CleanupStaleCalls(object? state)
     {
         long currentTicks = DateTime.UtcNow.Ticks;
-        // Timeout für echte Inaktivität (3s) und Hang-Time für PTT-Release (1.5s)
         long timeoutTicks = TimeSpan.FromSeconds(3).Ticks;
         long hangtimeTicks = TimeSpan.FromMilliseconds(1500).Ticks;
 
         foreach (var kvp in _activeCalls)
         {
             var call = kvp.Value;
-            long elapsed = currentTicks - call.Ticks;
+            var elapsed = currentTicks - call.Ticks;
 
-            // Fall 1: Ruf wurde per 0x02 als beendet markiert und die Hang-Time ist abgelaufen
             if (call.PendingTermination && elapsed > hangtimeTicks)
             {
                 if (_activeCalls.TryRemove(kvp.Key, out var removed))
                 {
-                    _logger.LogInformation("ENDE:  {CallType} von {SrcId} an {DstId} (sauber beendet)", 
-                        removed.IsGroupCall ? "GroupCall" : "PrivateCall", kvp.Key, removed.DstId);
-                    OnSignalingReceived?.Invoke(kvp.Key, removed.DstId, removed.IsGroupCall, 0x02);
+                    var durationSec = (int)((currentTicks - removed.StartTicks) / TimeSpan.TicksPerSecond);
+                    _logger.LogInformation("ENDE:  {CallType} von {SrcId} an {DstId} (sauber beendet)", removed.IsGroupCall ? "GroupCall" : "PrivateCall", kvp.Key, removed.DstId);
+                    OnSignalingReceived?.Invoke(kvp.Key, removed.DstId, removed.IsGroupCall, 0x02, durationSec);
                 }
             }
-            // Fall 2: Keine Pakete mehr empfangen (Verbindungsabbruch / Timeout)
             else if (!call.PendingTermination && elapsed > timeoutTicks)
             {
                 if (_activeCalls.TryRemove(kvp.Key, out var removed))
                 {
+                    var durationSec = (int)((currentTicks - removed.StartTicks) / TimeSpan.TicksPerSecond);
                     _logger.LogWarning("TIMEOUT: Call von {SrcId} an {DstId} wegen Inaktivität abgebrochen", kvp.Key, removed.DstId);
-                    OnSignalingReceived?.Invoke(kvp.Key, removed.DstId, removed.IsGroupCall, 0xFE);
+                    OnSignalingReceived?.Invoke(kvp.Key, removed.DstId, removed.IsGroupCall, 0xFE, durationSec);
                 }
             }
         }
