@@ -1,8 +1,10 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Text;
 using DMRoute_ng.Coding;
 using Microsoft.Extensions.Logging;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Types;
 
 namespace DMRoute_ng.Gateways;
 
@@ -11,12 +13,13 @@ public class SdsGateway
     private readonly ILogger<SdsGateway> _logger;
     private const byte FallbackColorCode = 1;
 
-    // Tuple um dstId erweitert
-    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, List<byte> Buffer)> _messageBuffers = new();
+    // Neues Flag 'bool IsConfirmedData' hinzugefügt
+    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, bool IsConfirmedData, List<byte> Buffer)>
+        _messageBuffers = new();
 
     // Event um Ziel-ID erweitert
     public event Action<int, int, string>? OnSmsReceived;
-    
+
     public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router)
     {
         _logger = logger;
@@ -28,72 +31,116 @@ public class SdsGateway
         if (packet.Length < 53) return;
 
         var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
-        var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10]; // Neu: Ziel-ID auslesen
+        var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
         var dataType = (byte)(packet[15] & 0x0F);
-        
-        if (dataType < 0x06 || dataType > 0x08) return;
+
+        if (dataType is < 0x06 or > 0x08) return;
 
         var payload = packet.AsSpan(20, 33);
 
-        if (dataType == 0x06) 
+        if (dataType == 0x06) // Text Header
         {
-            Span<byte> decodedHeader = stackalloc byte[12];
-            Bptc19696.Decode(payload, decodedHeader);
-            var expectedBlocks = decodedHeader[8] & 0x7F;
-            _messageBuffers[srcId] = (expectedBlocks, dstId, []); // Speichern
+            _messageBuffers[srcId] =
+                (ExpectedBlocks: 0, DstId: dstId, IsConfirmedData: false, Buffer: new List<byte>());
         }
-        else if (dataType is 0x07 or 0x08) 
+        else if (dataType is 0x07 or 0x08) // Data Blöcke
         {
-            if (!_messageBuffers.TryGetValue(srcId, out var session)) return;
+            var blockSize = dataType == 0x07 ? 12 : 18;
+            Span<byte> decodedData = stackalloc byte[blockSize];
 
-            byte[] decodedBlock;
-            int blockSize;
+            if (dataType == 0x07) Bptc19696.Decode(payload, decodedData);
+            else if (!DmrTrellis.Decode(payload, decodedData)) return;
 
-            if (dataType == 0x07)
+            if (!_messageBuffers.TryGetValue(srcId, out var session))
             {
-                decodedBlock = DmrFecDecoder.Decode(payload, FallbackColorCode);
-                blockSize = 12;
+                int ipIdx = decodedData.IndexOf((byte)0x45);
+                if (ipIdx == -1) return; // Padding Block verwerfen
+
+                bool isConfirmed = ipIdx == 2;
+                session = (ExpectedBlocks: 0, DstId: dstId, IsConfirmedData: isConfirmed, Buffer: new List<byte>());
+                _messageBuffers[srcId] = session;
             }
-            else 
-            {
-                decodedBlock = new byte[18];
-                if (!DmrTrellis.Decode(payload, decodedBlock)) return;
-                blockSize = 18;
-            }
-        
-            lock (session.Buffer)
-            {
-                session.Buffer.AddRange(decodedBlock);
 
-                if (session.Buffer.Count >= session.ExpectedBlocks * blockSize)
+            if (session.Buffer.Count == 0 && decodedData.Length > 2 && decodedData[2] == 0x45)
+            {
+                session.IsConfirmedData = true;
+                _messageBuffers[srcId] = session;
+            }
+
+            var startIndex = session.IsConfirmedData ? 2 : 0;
+            for (int i = startIndex; i < decodedData.Length; i++)
+            {
+                session.Buffer.Add(decodedData[i]);
+            }
+
+            var fullMessage = session.Buffer.ToArray();
+            var spanMessage = fullMessage.AsSpan();
+
+            var ipOffset = spanMessage.IndexOf((byte)0x45);
+
+            while (ipOffset != -1)
+            {
+                var ipSpan = spanMessage.Slice(ipOffset);
+                var ipv4 = new Ipv4Packet(ipSpan);
+
+                if (ipv4.IsValid)
                 {
-                    var fullMessage = session.Buffer.ToArray();
-                    var ipOffset = -1;
+                    var udp = new UdpDatagram(ipv4.Payload);
 
-                    for (var i = 0; i < 4; i++)
+                    if (udp.IsValid && (udp.SourcePort == 4007 || udp.DestinationPort == 4007))
                     {
-                        if (fullMessage[i] != 0x45 || fullMessage[i + 1] != 0x00) continue;
-                        ipOffset = i;
-                        break;
-                    }
+                        var tms = new TmsMessage(udp.Payload);
 
-                    if (ipOffset >= 0)
-                    {
-                        var textOffset = ipOffset + (dataType == 0x07 ? 38 : 42); 
-                        var textLength = fullMessage.Length - textOffset - 4; 
-                        
-                        if (textLength > 0)
+                        if (tms.IsValid)
                         {
-                            // Fix: UTF-8 Dekodierung (deckt ASCII ab, verhindert Zeichensalat bei 8-Bit SMS)
-                            var text = Encoding.UTF8.GetString(fullMessage, textOffset, textLength).TrimEnd('\0');
-                            if (!string.IsNullOrWhiteSpace(text)) 
+                            _messageBuffers.TryRemove(srcId, out _);
+
+                            var textLength = tms.TextBytes.Length;
+                            if (textLength > 0)
                             {
-                                _logger.LogInformation("SMS von {SrcId} an {DstId}: {Text}", srcId, session.DstId, text);
-                                OnSmsReceived?.Invoke(srcId, session.DstId, text);
+                                try
+                                {
+                                    string text;
+                                    if (tms.EncodingByte == 0x04)
+                                    {
+                                        if (textLength % 2 != 0) textLength--;
+                                        text = Encoding.Unicode.GetString(tms.TextBytes.Slice(0, textLength));
+                                    }
+                                    else
+                                    {
+                                        text = Encoding.UTF8.GetString(tms.TextBytes);
+                                    }
+
+                                    text = text.Trim('\0', '\r', '\n');
+
+                                    if (!string.IsNullOrWhiteSpace(text))
+                                    {
+                                        _logger.LogInformation("SMS von {SrcId} an {DstId} (Enc: 0x{Enc:X2}): {Text}",
+                                            srcId, session.DstId, tms.EncodingByte, text);
+                                        OnSmsReceived?.Invoke(srcId, session.DstId, text);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "Fehler beim Dekodieren der SMS (Enc: 0x{Enc:X2})",
+                                        tms.EncodingByte);
+                                }
                             }
                         }
+
+                        return;
                     }
-                    _messageBuffers.TryRemove(srcId, out _);
+                }
+
+                // Weitersuchen, falls 0x45 ein Fehlfund war
+                if (ipOffset + 1 < spanMessage.Length)
+                {
+                    var nextIdx = spanMessage.Slice(ipOffset + 1).IndexOf((byte)0x45);
+                    ipOffset = nextIdx == -1 ? -1 : ipOffset + 1 + nextIdx;
+                }
+                else
+                {
+                    ipOffset = -1;
                 }
             }
         }

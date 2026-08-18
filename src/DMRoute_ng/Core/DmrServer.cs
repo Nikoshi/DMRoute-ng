@@ -199,19 +199,19 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         {
             try
             {
-                var callsign = ReadNextString(ref configPayload);
-                var rxFreq = ReadNextString(ref configPayload);
-                var txFreq = ReadNextString(ref configPayload);
-                _ = int.TryParse(ReadNextString(ref configPayload), out var txPower);
-                _ = int.TryParse(ReadNextString(ref configPayload), out var colorCode);
-                _ = float.TryParse(ReadNextString(ref configPayload), System.Globalization.CultureInfo.InvariantCulture, out var lat);
-                _ = float.TryParse(ReadNextString(ref configPayload), System.Globalization.CultureInfo.InvariantCulture, out var lon);
-                _ = int.TryParse(ReadNextString(ref configPayload), out var height);
-                var loc = ReadNextString(ref configPayload);
-                var desc = ReadNextString(ref configPayload);
-                var url = ReadNextString(ref configPayload);
-                var software = ReadNextString(ref configPayload);
-                var package = ReadNextString(ref configPayload);
+                var callsign = ReadFixedString(ref configPayload, 8);
+                var rxFreq = ReadFixedString(ref configPayload, 9);
+                var txFreq = ReadFixedString(ref configPayload, 9);
+                _ = int.TryParse(ReadFixedString(ref configPayload, 2), out var txPower);
+                _ = int.TryParse(ReadFixedString(ref configPayload, 2), out var colorCode);
+                _ = float.TryParse(ReadFixedString(ref configPayload, 8), System.Globalization.CultureInfo.InvariantCulture, out var lat);
+                _ = float.TryParse(ReadFixedString(ref configPayload, 9), System.Globalization.CultureInfo.InvariantCulture, out var lon);
+                _ = int.TryParse(ReadFixedString(ref configPayload, 3), out var height);
+                var loc = ReadFixedString(ref configPayload, 20);
+                var desc = ReadFixedString(ref configPayload, 20);
+                var url = ReadFixedString(ref configPayload, 124);
+                var software = ReadFixedString(ref configPayload, 40);
+                var package = ReadFixedString(ref configPayload, 40);
 
                 repeater.Configuration = new RepeaterConfiguration(
                     callsign, rxFreq, txFreq, txPower, colorCode, lat, lon, height, loc, desc, url, software, package
@@ -245,23 +245,18 @@ public class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, Mic
         }
     }
     
-    private static string ReadNextString(ref ReadOnlySpan<byte> buffer)
+    private static string ReadFixedString(ref ReadOnlySpan<byte> buffer, int length)
     {
-        if (buffer.IsEmpty) return string.Empty;
-    
-        var nullIdx = buffer.IndexOf((byte)0);
-        if (nullIdx == -1)
+        if (buffer.Length < length)
         {
-            // Fallback: Kein Null-Byte gefunden, nimm den Rest
-            var str = Encoding.ASCII.GetString(buffer);
+            var str = Encoding.ASCII.GetString(buffer).Trim('\0', ' ');
             buffer = default;
             return str;
         }
         else
         {
-            var str = Encoding.ASCII.GetString(buffer[..nullIdx]);
-            // Slice den Puffer weiter (+1 um das Null-Byte zu überspringen)
-            buffer = buffer[(nullIdx + 1)..];
+            var str = Encoding.ASCII.GetString(buffer[..length]).Trim('\0', ' ');
+            buffer = buffer[length..];
             return str;
         }
     }
