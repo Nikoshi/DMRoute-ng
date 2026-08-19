@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Threading.Channels;
+using DMRoute_ng.Integration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -19,7 +21,9 @@ public sealed class LocalGuestDeviceEntry(int deviceId, IPEndPoint hotspotEndPoi
     public long LastSeenTicks = DateTime.UtcNow.Ticks;
 }
 
-public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : BackgroundService
+public sealed class RoamingRegistry(
+    ILogger<RoamingRegistry> logger,
+    ChannelWriter<MqttEvent> eventWriter) : BackgroundService
 {
     private readonly ConcurrentDictionary<int, ForeignDeviceEntry> _roamingHomeDevices = new();
     private readonly ConcurrentDictionary<int, LocalGuestDeviceEntry> _localGuestDevices = new();
@@ -37,10 +41,7 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
             },
             (id, entry) =>
             {
-                if (entry.CurrentZoneId != foreignZoneId)
-                {
-                    isNewOrChanged = true;
-                }
+                if (entry.CurrentZoneId != foreignZoneId) isNewOrChanged = true;
                 entry.CurrentZoneId = foreignZoneId;
                 Volatile.Write(ref entry.LastSeenTicks, DateTime.UtcNow.Ticks);
                 return entry;
@@ -49,6 +50,7 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
         if (isNewOrChanged)
         {
             logger.LogInformation("Roaming: Heimat-Gerät {DeviceId} roamt in Zone {ZoneId}", deviceId, foreignZoneId);
+            eventWriter.TryWrite(new MqttEvent(0x12, deviceId, foreignZoneId));
         }
     }
 
@@ -66,15 +68,25 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
 
     public void TrackLocalGuest(int deviceId, IPEndPoint hotspotEndPoint)
     {
+        bool isNew = false;
         _localGuestDevices.AddOrUpdate(
             deviceId,
-            id => new LocalGuestDeviceEntry(id, hotspotEndPoint),
+            id => 
+            {
+                isNew = true;
+                return new LocalGuestDeviceEntry(id, hotspotEndPoint);
+            },
             (id, entry) =>
             {
                 entry.HotspotEndPoint = hotspotEndPoint;
                 Volatile.Write(ref entry.LastSeenTicks, DateTime.UtcNow.Ticks);
                 return entry;
             });
+
+        if (isNew)
+        {
+            eventWriter.TryWrite(new MqttEvent(0x10, deviceId));
+        }
     }
 
     public bool TryGetLocalGuestEndpoint(int deviceId, out IPEndPoint? hotspotEndPoint)
@@ -95,7 +107,6 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            // Timeout nach 15 Minuten Inaktivität
             long cutoffTicks = DateTime.UtcNow.AddMinutes(-15).Ticks;
 
             foreach (var kvp in _roamingHomeDevices)
@@ -105,6 +116,7 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
                     if (_roamingHomeDevices.TryRemove(kvp.Key, out _))
                     {
                         logger.LogInformation("Roaming: Eintrag für {DeviceId} abgelaufen", kvp.Key);
+                        eventWriter.TryWrite(new MqttEvent(0x13, kvp.Key));
                     }
                 }
             }
@@ -113,7 +125,10 @@ public sealed class RoamingRegistry(ILogger<RoamingRegistry> logger) : Backgroun
             {
                 if (Volatile.Read(ref kvp.Value.LastSeenTicks) < cutoffTicks)
                 {
-                    _localGuestDevices.TryRemove(kvp.Key, out _);
+                    if (_localGuestDevices.TryRemove(kvp.Key, out _))
+                    {
+                        eventWriter.TryWrite(new MqttEvent(0x11, kvp.Key));
+                    }
                 }
             }
         }

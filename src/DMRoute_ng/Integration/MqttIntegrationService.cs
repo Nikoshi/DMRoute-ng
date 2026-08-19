@@ -52,7 +52,7 @@ public sealed class MqttIntegrationService : BackgroundService
     {
         _logger = logger;
         _masterRegistry = masterRegistry;
-        _zoneId = config.GetValue("ZoneId", 1);
+        _zoneId = config.GetValue("ZoneId", 100); // TODO: Das sollte hier nicht doppelt stehen :) wir übergeben die lieber über den Constructor
         _mqttClient = mqttClient;
         _eventChannel = eventChannel;
 
@@ -112,14 +112,26 @@ public sealed class MqttIntegrationService : BackgroundService
 
                 switch (mqttEvent.EventType)
                 {
-                    case 1:
+                    case 0x01:
                         PublishCallActive(mqttEvent, topicSpan, bufferSpan);
                         break;
-                    case 2:
+                    case 0x02:
                         PublishCallEnd(mqttEvent, topicSpan, bufferSpan);
                         break;
-                    case 3:
+                    case 0x03:
                         PublishSms(mqttEvent, topicSpan, bufferSpan);
+                        break;
+                    case 0x10:
+                        PublishGuest(mqttEvent, topicSpan, bufferSpan, true);
+                        break;
+                    case 0x11:
+                        PublishGuest(mqttEvent, topicSpan, bufferSpan, false);
+                        break;
+                    case 0x12:
+                        PublishAway(mqttEvent, topicSpan, bufferSpan, true);
+                        break;
+                    case 0x13:
+                        PublishAway(mqttEvent, topicSpan, bufferSpan, false);
                         break;
                 }
             }
@@ -201,6 +213,45 @@ public sealed class MqttIntegrationService : BackgroundService
         _mqttClient.Publish(topicSpan[..tLen], bufferSpan[..b.Length], retain: true);
     }
 
+    private void PublishGuest(in MqttEvent ev, Span<byte> topicSpan, Span<byte> bufferSpan, bool active)
+    {
+        int tLen = BuildBaseTopic(topicSpan, "roaming/guests/"u8);
+        Utf8Formatter.TryFormat(ev.SrcId, topicSpan[tLen..], out int w);
+        tLen += w;
+
+        if (!active)
+        {
+            _mqttClient.Publish(topicSpan[..tLen], ReadOnlySpan<byte>.Empty, retain: true);
+            return;
+        }
+
+        var b = new JsonSpanBuilder(bufferSpan, isArrayRoot: false);
+        b.AppendNumber("timestamp"u8, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        b.Finish();
+
+        _mqttClient.Publish(topicSpan[..tLen], bufferSpan[..b.Length], retain: true);
+    }
+
+    private void PublishAway(in MqttEvent ev, Span<byte> topicSpan, Span<byte> bufferSpan, bool active)
+    {
+        int tLen = BuildBaseTopic(topicSpan, "roaming/away/"u8);
+        Utf8Formatter.TryFormat(ev.SrcId, topicSpan[tLen..], out int w);
+        tLen += w;
+
+        if (!active)
+        {
+            _mqttClient.Publish(topicSpan[..tLen], ReadOnlySpan<byte>.Empty, retain: true);
+            return;
+        }
+
+        var b = new JsonSpanBuilder(bufferSpan, isArrayRoot: false);
+        b.AppendNumber("foreignZone"u8, ev.DstId);
+        b.AppendNumber("timestamp"u8, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        b.Finish();
+
+        _mqttClient.Publish(topicSpan[..tLen], bufferSpan[..b.Length], retain: true);
+    }
+    
     private int BuildBaseTopic(Span<byte> buffer, ReadOnlySpan<byte> subTree)
     {
         int offset = 0;

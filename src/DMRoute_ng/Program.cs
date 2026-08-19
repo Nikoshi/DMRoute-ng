@@ -71,10 +71,14 @@ builder.Services.AddSingleton<RawMqttClient>(sp =>
 
 builder.Services.AddSingleton(Channel.CreateBounded<MqttEvent>(new BoundedChannelOptions(1000)
 {
-    SingleReader = true, 
-    SingleWriter = false, 
+    SingleReader = true,
+    SingleWriter = false,
     FullMode = BoundedChannelFullMode.DropOldest
 }));
+
+// Mappings für DI-Auflösung hinzufügen
+builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<MqttEvent>>().Writer);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<MqttEvent>>().Reader);
 
 builder.Services.AddHostedService<MqttIntegrationService>();
 
