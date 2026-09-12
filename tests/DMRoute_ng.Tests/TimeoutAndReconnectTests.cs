@@ -39,13 +39,14 @@ public class TimeoutAndReconnectTests
         var registry = new RepeaterRegistry(NullLogger<RepeaterRegistry>.Instance, 100, "secret");
         registry.TryGet(1000001, out var repeater);
         
-        repeater.EndPoint = originalEndpoint;
+        repeater.EndPoint = Ipv4Endpoint.FromIPEndPoint(originalEndpoint);
         repeater.State = RepeaterState.Disconnected;
 
         // Act (Abbildung der Logik aus HandleRptPing)
         var incomingEndpoint = new IPEndPoint(IPAddress.Parse("192.168.1.100"), 62031);
         
-        if (repeater is { State: RepeaterState.Disconnected, EndPoint: not null } && repeater.EndPoint.Equals(incomingEndpoint))
+        if (repeater is { State: RepeaterState.Disconnected, EndPoint: not null } &&
+            repeater.EndPoint.Value == Ipv4Endpoint.FromIPEndPoint(incomingEndpoint))
         {
             repeater.State = RepeaterState.LoggedIn;
         }

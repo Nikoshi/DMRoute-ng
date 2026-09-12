@@ -1,7 +1,6 @@
-﻿using System.Threading.Channels;
-using DMRoute_ng.Core;
+﻿using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
-using DMRoute_ng.Integration; // NEU
+using DMRoute_ng.Integration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using DMRoute_ng.Registry;
@@ -23,12 +22,18 @@ if (string.IsNullOrWhiteSpace(mqttHost))
 var myZoneId = builder.Configuration.GetValue("ZoneId", 100);
 var meshPsk = builder.Configuration.GetValue<string>("MeshPsk", "s3cr37m3sh");
 var myZonePsk = builder.Configuration.GetValue<string>("ZonePsk", "s3cr37w0rd");
+var maxActiveCalls = builder.Configuration.GetValue("Routing:MaxActiveCalls", 256);
+var maxLocalDeviceRoutes = builder.Configuration.GetValue("Routing:MaxLocalDeviceRoutes", 8192);
+var maxSdsSessions = builder.Configuration.GetValue("Sds:MaxSessions", 128);
+var maxSdsMessageBytes = builder.Configuration.GetValue("Sds:MaxMessageBytes", 4096);
 
 // --- Registries & Background Tasks ---
 builder.Services.AddSingleton<MasterRegistry>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MasterRegistry>());
 
-builder.Services.AddSingleton<RoamingRegistry>();
+builder.Services.AddSingleton<RoamingRegistry>(sp => new RoamingRegistry(
+    sp.GetRequiredService<ILogger<RoamingRegistry>>(),
+    maxLocalDeviceRoutes));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RoamingRegistry>());
 
 builder.Services.AddSingleton<RepeaterRegistry>(sp => 
@@ -55,12 +60,18 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<MasterRegistry>(),
         sp.GetRequiredService<RoamingRegistry>(),
         sp.GetRequiredService<MeshDiscoveryService>(),
-        myZoneId
+        myZoneId,
+        maxActiveCalls,
+        maxLocalDeviceRoutes
     )
 );
 
 builder.Services.AddHostedService<DmrServer>();
-builder.Services.AddSingleton<SdsGateway>();
+builder.Services.AddSingleton<SdsGateway>(sp => new SdsGateway(
+    sp.GetRequiredService<ILogger<SdsGateway>>(),
+    sp.GetRequiredService<MicroSubnetRouter>(),
+    maxSdsSessions,
+    maxSdsMessageBytes));
 
 
 builder.Services.AddSingleton<RawMqttClient>(sp => 
@@ -68,17 +79,6 @@ builder.Services.AddSingleton<RawMqttClient>(sp =>
     var clientId = System.Text.Encoding.UTF8.GetBytes($"dmroute_{myZoneId}_{Random.Shared.Next(1000, 9999)}");
     return new RawMqttClient(clientId);
 });
-
-builder.Services.AddSingleton(Channel.CreateBounded<MqttEvent>(new BoundedChannelOptions(1000)
-{
-    SingleReader = true,
-    SingleWriter = false,
-    FullMode = BoundedChannelFullMode.DropOldest
-}));
-
-// Mappings für DI-Auflösung hinzufügen
-builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<MqttEvent>>().Writer);
-builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<MqttEvent>>().Reader);
 
 builder.Services.AddHostedService<MqttIntegrationService>();
 

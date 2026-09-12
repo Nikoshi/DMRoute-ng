@@ -1,0 +1,234 @@
+= Hardware-Smoke-Test mit einem Hotspot
+:toc:
+:sectnums:
+
+== Ziel und Reichweite
+
+Dieser Test prüft einen DMRoute-ng-Master der Zone `100` mit den Funkgeräte-IDs `10001` und `10101` sowie einem einzelnen Homebrew/MMDVM-Hotspot.
+
+Mit diesem Aufbau lassen sich folgende Pfade belastbar prüfen:
+
+* Homebrew-Anmeldung, Authentifizierung, Konfigurationsaustausch und Keepalive des Hotspots,
+* Empfang und Abschluss von Gruppen- und Privatrufen,
+* Lernen einer lokalen Teilnehmerroute für `10001`,
+* Erkennen des Teilnehmers `10101` als Gast aus Zone `101`,
+* Rückleitung eines Privatrufs an einen zuvor gelernten Teilnehmer am selben Hotspot,
+* Timeout und erneute Anmeldung des Hotspots,
+* SDS/SMS-Reassembly, Dekodierung und Zustellung in beiden Richtungen.
+
+Ein zweiter unabhängiger RF-Endpunkt fehlt. Deshalb beweist empfangenes Audio allein keine Weiterleitung durch den Master: Beide Funkgeräte können sich direkt auf derselben Frequenz hören. Die Rückleitung eines Privatrufs wird stattdessen anhand der UDP-Richtung im Paketmitschnitt geprüft. Gruppenrufe werden vom Router absichtlich nicht an den Hotspot zurückgesendet, von dem sie stammen.
+
+== Voraussetzungen
+
+=== IDs und Zonen
+
+DMRoute-ng ordnet Teilnehmer über Ganzzahldivision einer Zone zu:
+
+[source,text]
+----
+10001 / 100 = Zone 100, lokal
+10101 / 100 = Zone 101, Gast
+----
+
+Der Hotspot benötigt eine eigene Repeater-ID, für die gilt:
+
+[source,text]
+----
+HOTSPOT_ID / 10000 = 100
+----
+
+Für einen Test kann beispielsweise `1000001` verwendet werden. Das Hotspot-Passwort ist ohne Trennzeichen aus `ZonePsk` und Hotspot-ID zusammengesetzt. Beim Standard-PSK ergibt sich für dieses Beispiel `s3cr37w0rd1000001`.
+
+=== Hotspot
+
+Im Hotspot werden folgende Werte gesetzt. Die Bezeichnungen unterscheiden sich zwischen MMDVMHost, Pi-Star, WPSD und openSPOT:
+
+[cols="1,2"]
+|===
+|Feld |Wert
+
+|Master/Server
+|IPv4-Adresse des Rechners, auf dem DMRoute-ng läuft
+
+|Master-Port
+|`62031/UDP`
+
+|Hotspot-/Repeater-ID
+|eine ID aus Zone 100, beispielsweise `1000001`
+
+|Passwort
+|`ZonePsk` unmittelbar gefolgt von der Hotspot-ID
+
+|Frequenz, Color Code, Timeslot
+|auf Hotspot und beiden Funkgeräten identisch; bei einem Simplex-Hotspot dessen vorgesehenen Timeslot verwenden
+|===
+
+Eine lokale Firewall muss eingehendes UDP auf Port `62031` erlauben. Beide Funkgeräte erhalten je einen Gruppen-Kontakt, beispielsweise TG 9, und Private-Call-Kontakte für `10001` und `10101`.
+
+=== Master und Diagnose
+
+Der Master benötigt auch dann einen `Mqtt:Host`, wenn MQTT für den Test nicht ausgewertet wird. In einem Terminal wird er aus dem Projektverzeichnis gestartet:
+
+[source,shell]
+----
+MQTT__Host=<BROKER_IP> MQTT__Port=1883 ZoneId=100 ZonePsk=<ZONE_PSK> make run 2>&1 | tee /tmp/dmroute-hardware.log
+----
+
+Ist kein Broker erreichbar, kann dessen Adresse vorübergehend auf `127.0.0.1` gesetzt werden. Der Master arbeitet weiter und meldet lediglich MQTT-Verbindungsfehler. MQTT-Nachweise entfallen dann.
+
+Für den belastbaren Nachweis der Paketrichtung wird parallel ein Mitschnitt gestartet:
+
+[source,shell]
+----
+tcpdump -D
+sudo tcpdump -ni <NETZWERK_INTERFACE> -s 0 -w /tmp/dmroute-hardware.pcap 'udp port 62031'
+----
+
+Auf macOS wird aus der ersten Ausgabe das Interface gewählt, über das der Hotspot erreichbar ist, beispielsweise `en0` für WLAN oder ein verbundenes Ethernet-Interface. `any` ist dort nicht auf jedem System verfügbar.
+
+Falls ein MQTT-Client vorhanden ist, wird vor dem ersten Funkruf der gesamte Testbaum abonniert:
+
+[source,shell]
+----
+mosquitto_sub -h <BROKER_IP> -p 1883 -v -t 'dmroute/100/#'
+----
+
+== Durchführung
+
+Zwischen zwei Funkaktionen mindestens fünf Sekunden warten. Für jede Aktion die lokale Uhrzeit notieren; damit lassen sich Log, MQTT und Paketmitschnitt eindeutig zusammenführen.
+
+=== H01: Anmeldung und Keepalive
+
+. Master starten.
+. Hotspot starten oder seine DMR-Verbindung neu aufbauen lassen.
+. Mindestens 20 Sekunden warten.
+
+Erwartet werden im Paketmitschnitt `RPTL`, Challenge-`RPTACK`, `RPTK`, Login-`RPTACK`, `RPTC` und anschließend `RPTPING`/`MSTPONG`. Im Master-Log erscheinen mindestens `RPTC (Config)` und `RPTACK (Config bestätigt)`. Eine `MSTNAK`-Meldung bedeutet meist, dass Hotspot-ID, Zone oder Passwort nicht zusammenpassen.
+
+=== H02: Lokaler Gruppenruf von 10001
+
+. Funkgerät `10001` auf TG 9 stellen.
+. PTT etwa drei Sekunden halten und dann loslassen.
+. Fünf Sekunden warten.
+
+Erwartetes Log:
+
+[source,text]
+----
+START: GroupCall von 10001 an 9
+ENDE: GroupCall von 10001 an 9 (sauber beendet)
+----
+
+MQTT veröffentlicht den Start nicht-retained unter `dmroute/100/call/active` und retained unter `dmroute/100/call/active/10001`. Nach dem Rufende löscht ein leerer retained Payload das Teilnehmer-Topic; `dmroute/100/call/event` enthält anschließend Dauer und Endegrund.
+
+Im Mitschnitt müssen DMRD-Pakete vom Hotspot zum Master sichtbar sein. Es werden für diesen Gruppenruf keine DMRD-Pakete vom Master zum selben Hotspot erwartet.
+
+=== H03: Gast-Erkennung und Gruppenruf von 10101
+
+. Funkgerät `10101` auf TG 9 stellen.
+. PTT etwa drei Sekunden halten und dann loslassen.
+. Fünf Sekunden warten.
+
+Erwartet werden `START` und `ENDE` für `GroupCall von 10101 an 9`. Zusätzlich legt MQTT das retained Topic `dmroute/100/routing/roaming/guests/10101` an. Dessen Feld `connectedViaHotspot` muss die tatsächlich angemeldete Repeater-ID enthalten. Damit ist nachgewiesen, dass die fremde Teilnehmer-ID als Gast der Zone 101 erfasst wurde.
+
+=== H04: Private Call 10001 nach 10101
+
+H02 und H03 müssen vorher erfolgreich gewesen sein, damit beide Teilnehmer am Hotspot bekannt sind.
+
+. Auf Funkgerät `10001` den Private-Call-Kontakt `10101` auswählen.
+. PTT etwa drei Sekunden halten und dann loslassen.
+. Fünf Sekunden warten.
+
+Erwartet werden `START: PrivateCall von 10001 an 10101` und ein sauberes Ende. Im Paketmitschnitt müssen passende DMRD-Pakete in beiden IP-Richtungen erscheinen:
+
+[source,text]
+----
+Hotspot -> Master:62031
+Master:62031 -> Hotspot
+----
+
+Die zweite Richtung ist der Nachweis, dass DMRoute-ng den zuvor erfassten Gast am lokalen Hotspot gefunden und den Privatruf zurückgeleitet hat. Ob Funkgerät `10101` Audio wiedergibt, ist ein zusätzlicher RF-Funktionstest, aber kein eindeutiger Routing-Nachweis.
+
+=== H05: Private Call 10101 nach 10001
+
+. Auf Funkgerät `10101` den Private-Call-Kontakt `10001` auswählen.
+. PTT etwa drei Sekunden halten und dann loslassen.
+. Fünf Sekunden warten.
+
+Erwartet werden `START: PrivateCall von 10101 an 10001`, das saubere Ende und DMRD-Pakete in beiden IP-Richtungen. Die zweite Richtung beweist, dass die in H02 gelernte lokale Route für `10001` verwendet wurde.
+
+=== H06: Hotspot-Timeout und Wiederanmeldung
+
+. Hotspot ausschalten oder seine Netzwerkverbindung trennen, ohne dass gerade gesendet wird.
+. Mindestens 55 Sekunden warten.
+. Hotspot wieder verbinden und anschließend mit `10001` einen kurzen TG-9-Ruf senden.
+
+Erwartet wird nach ungefähr 45 bis 50 Sekunden `Timeout für Repeater ... Setze auf Disconnected`. Nach dem Wiederverbinden müssen der Konfigurationsaustausch und H02 erneut funktionieren. Je nach Hotspot-Software erfolgt eine vollständige Anmeldung oder ein Soft-Reconnect per Ping.
+
+=== H07: SDS/SMS in beiden Richtungen
+
+Direkte SDS an einzelne Teilnehmer verwenden bestätigte Datenübertragung. SDS an eine Talkgroup verwendet unbestätigte Datenübertragung.
+
+. Von `10001` eine kurze Nachricht wie `DMR TEST 1` an `10101` senden.
+. Zehn Sekunden warten und den angezeigten Sendestatus notieren.
+. Von `10101` die Nachricht `DMR TEST 2` an `10001` senden.
+. Erneut zehn Sekunden warten und den angezeigten Sendestatus notieren.
+
+Erwartete Logzeilen enthalten jeweils Quelle, Ziel, Encoding und den vollständigen Text:
+
+[source,text]
+----
+SMS von 10001 an 10101 (...): DMR TEST 1
+SMS von 10101 an 10001 (...): DMR TEST 2
+----
+
+MQTT veröffentlicht beide Nachrichten nicht-retained unter `dmroute/100/sds/sms`; `srcId` und `dstId` im JSON-Payload unterscheiden die Richtung. Im Mitschnitt werden die zugehörigen DMRD-Datenframes sowie die Rückleitung vom Master zum Hotspot geprüft. Damit werden Transport, Reassembly und Textdekodierung getrennt bewertet. Falls der Transport sichtbar ist, aber Log oder MQTT-Text fehlt, ist das ein konkreter SDS-Kompatibilitäts- oder Decoderfehler und kein allgemeiner Verbindungsfehler.
+
+Bei einem Fehler der bestätigten Übertragung kann zusätzlich eine unbestätigte Gruppen-SDS an TG 9 gesendet werden. Erreichen deren Datenblöcke den Master, sind Encoder und Decoder grundsätzlich kompatibel und der Fehler ist auf den Confirmed-Handshake einzugrenzen.
+
+== Ergebnisübergabe und Verifikation
+
+Nach dem letzten Schritt zuerst `tcpdump` und danach den Master mit `Ctrl+C` beenden. Für die Auswertung werden benötigt:
+
+* `/tmp/dmroute-hardware.log`,
+* `/tmp/dmroute-hardware.pcap`,
+* die notierten Uhrzeiten und das Ergebnis je Schritt (`OK`, `Fehler` oder `nicht ausgeführt`),
+* Hotspot-Modell, Software/Firmware und verwendete Hotspot-ID,
+* bei SMS zusätzlich Hersteller und Modell der Funkgeräte.
+
+Liegen die Dateien auf derselben Entwicklungsmaschine, genügt die Mitteilung ihrer Pfade. Aus dem Log werden Anmeldung, Call-Zustand und Roaming geprüft; der PCAP bestätigt Protokollfolge, Ping-Antworten und bei H04/H05 die tatsächliche Rückleitung zum Hotspot.
+
+== Abnahmekriterien
+
+[cols="1,2,1"]
+|===
+|Test |Bestanden, wenn |Pflicht
+
+|H01
+|Authentifizierung, RPTC und mindestens ein Ping/Pong vollständig sind
+|ja
+
+|H02
+|lokaler Gruppenruf mit Start und sauberem Ende erkannt wird; kein Echo zum Ursprung erfolgt
+|ja
+
+|H03
+|Gast-Ruf erkannt und MQTT-Gaststatus publiziert wird
+|ja, bei erreichbarem MQTT
+
+|H04
+|Privatruf erkannt und per UDP zum Hotspot zurückgesendet wird
+|ja
+
+|H05
+|Gegenrichtung erkannt und per UDP zum Hotspot zurückgesendet wird
+|ja
+
+|H06
+|Timeout erkannt wird und der Hotspot danach wieder arbeiten kann
+|ja
+
+|H07
+|beide SMS transportiert, vollständig dekodiert und mit korrekten IDs publiziert werden
+|ja
+|===

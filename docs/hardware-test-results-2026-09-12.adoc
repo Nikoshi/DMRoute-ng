@@ -1,0 +1,87 @@
+= Hardware-Testbericht vom 12. September 2026
+:toc:
+:sectnums:
+
+== Aufbau
+
+Der Test wurde mit einem DMRoute-ng-Master der Zone `100`, einem Homebrew-Hotspot und den Funkgeräte-IDs `10001` und `10101` durchgeführt. Funkgerät `10101` ist ein Retevis-Gerät, dessen SDS-Verhalten nach Erfahrung des Betreibers nicht immer zuverlässig ist.
+
+[cols="1,2"]
+|===
+|Komponente |Testwert
+
+|Master
+|Zone `100`, `10.229.157.107:62031/UDP`
+
+|Hotspot
+|ID `1000001`, `10.229.157.110:62032/UDP`
+
+|Hotspot-Metadaten
+|Callsign `M1ABC`, Software `20240210_PS4`
+
+|Lokaler Teilnehmer
+|`10001` in Zone 100
+
+|Gast
+|`10101` mit Home-Zone 101
+
+|MQTT
+|temporärer lokaler Prüfempfänger auf `127.0.0.1:1883`
+|===
+
+Server-Log, MQTT-Log und PCAP wurden während des Laufs unter `/tmp/dmroute-hardware.log`, `/tmp/dmroute-mqtt.log` und `/tmp/dmroute-hardware.pcap` abgelegt. Sie sind Laufartefakte und werden nicht ins Repository eingecheckt.
+
+== Ergebnisse
+
+[cols="1,1,4"]
+|===
+|Test |Status |Nachweis
+
+|H01 Anmeldung und Keepalive
+|Bestanden
+|`RPTL`, `RPTK`, `RPTC`, `RPTACK` sowie fortlaufendes `RPTPING`/`MSTPONG` wurden aufgezeichnet. Zwei Pings einer alten Sitzung erhielten zunächst `MSTNAK`; danach meldete sich Hotspot `1000001` vollständig neu an.
+
+|H02 Gruppenruf `10001` nach TG 9
+|Bestanden
+|Start, sauberes Ende, MQTT Active/History und retained Löschung im damals implementierten Topic-Baum wurden bestätigt. Gruppen-DMRD wurde nicht an den Ursprungs-Hotspot zurückgesendet.
+
+|H03 Gast `10101` nach TG 9
+|Bestanden
+|Start und sauberes Ende wurden erkannt. MQTT veröffentlichte retained das damalige Topic `dmroute/100/roaming/guests/10101`.
+
+|H04 Private Call `10001` nach `10101`
+|Bestanden
+|Start, Ende und MQTT stimmen. Jedes relevante eingehende DMRD wurde vom Master an den lokalen Gast-Hotspot zurückgesendet.
+
+|H05 Private Call `10101` nach `10001`
+|Bestanden
+|Start, Ende und MQTT stimmen. Der PCAP bestätigt die Rückleitung über die zuvor gelernte lokale Route für `10001`.
+
+|H06 Timeout und Reconnect
+|Bestanden
+|Der Hotspot wurde nach 45 Sekunden Inaktivität auf `Disconnected` gesetzt, meldete sich danach erneut an und führte anschließend Gruppenrufe, Private Calls und SDS aus.
+
+|H07 Confirmed SDS `10001` nach `10101`
+|Bestanden
+|DMR-Datenheader und Datenblöcke wurden in beiden IP-Richtungen aufgezeichnet. Der Gateway dekodierte UTF-16LE (`0x04`) exakt als `DMR TEST 1`; MQTT veröffentlichte das damalige Topic `dmroute/100/sms/10101/10001`.
+
+|H07 Confirmed SDS `10101` nach `10001`
+|Teilweise
+|CSBK und ein Confirmed-Data-Header (`0x06`) wurden empfangen und zum Hotspot zurückgeleitet. Das Retevis-Gerät sendete danach keine Rate-3/4-Datenblöcke (`0x08`); daher gab es keinen Text zum Reassemblieren oder Publizieren.
+
+|SDS-Diagnose `10101` nach TG 9
+|Bestanden
+|Die unbestätigte Gruppen-SDS `DMR TEST TG` wurde vom selben Retevis-Gerät vollständig übertragen, als UTF-16LE dekodiert und unter dem damaligen Topic `dmroute/100/sms/9/10101` publiziert. Das grenzt den vorherigen Fehler auf den Confirmed-Handshake der Gegenrichtung ein.
+|===
+
+Ein zusätzlicher Gruppenruf von `10001` verlor seinen Terminator und wurde nach sieben Sekunden korrekt als Call-Timeout beendet. Mehrere APRS-CSBK-Pakete von `10001` wurden ebenfalls erkannt.
+
+== Paketbilanz
+
+Der Mitschnitt enthält 439 eingehende DMRD-Pakete und 155 vom Master zurückgesendete DMRD-Pakete. Für beide Private-Call-Richtungen sind die ein- und ausgehenden Sprachframes vollständig gepaart. Für Gruppenrufe existiert erwartungsgemäß keine Rücksendung zum Ursprungs-Hotspot.
+
+Die bestätigte SDS `10001` nach `10101` enthält sowohl Datenheader (`0x06`) als auch Rate-3/4-Datenblöcke (`0x08`) in beiden IP-Richtungen. In der Gegenrichtung ist nur der Datenheader vorhanden. Diese Unterscheidung zeigt, dass der Master den Handshake-Frame korrekt routete und das Ausbleiben des Texts vor der Reassembly im Gateway entstand.
+
+== Offene Beobachtung
+
+Die unbestätigte SDS an TG 9 trägt in den vom Hotspot gelieferten DMRD-Datenframes das Unit-Call-Bit. Der Router behandelt das Ziel deshalb als Teilnehmer-ID der Zone 0, protokolliert `Ziel 9 (Zone 0) unbekannt oder offline` und würde diese Frames bei mehreren Hotspots nicht als Gruppenverkehr verteilen. Der lokale SDS-Decoder arbeitet davon unabhängig und dekodierte den Text korrekt. Vor einem Mehr-Hotspot-Test sollte festgelegt werden, wie Talkgroup-SDS zuverlässig von normalen Unit-Data-Frames unterschieden wird.

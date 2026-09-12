@@ -19,7 +19,7 @@ Pakete, die an eine bestimmte Ziel-ID (`dstId`) adressiert sind, werden ausschli
 Durch den Verzicht auf dynamische Listen-Lookups für Abonnements skaliert das Routing-Verfahren extrem effizient.
 Die mathematische Zuordnung eines Ziels zu einem Haushalt erfolgt in konstanter Zeit ($O(1)$).
 
-Das anschließende Filtern der aktiven Repeater-Liste (via Zero-Allocation `ReadOnlySpan`) erfolgt linear zur Anzahl der eingeloggten Repeater im Netzwerk ($O(N)$), wobei der Matching-Vergleich pro Repeater wiederum in $O(1)$ erfolgt.
+Das anschließende Filtern der aktiven Repeater-Liste erfolgt über einen unveränderlichen Registry-Snapshot linear zur Anzahl der bekannten Repeater ($O(N)$). Der Snapshot wird nur bei Topologieänderungen ersetzt; seine Iteration im Paketpfad allokiert nicht.
 
 Dies ermöglicht ein nahtloses Roaming: Sobald sich ein Repeater in einem Subnetz anmeldet, empfängt er automatisch den Traffic seines Haushalts, ohne dass serverseitig explizite Routing-Tabellen aktualisiert werden müssen.
 
@@ -29,3 +29,9 @@ Das reine Subnetz-Routing wurde um Mesh-Roaming erweitert, um netzwerkübergreif
 * **Gäste-Erfassung:** Fremde IDs werden dynamisch erkannt (`TrackLocalGuest`) und deren Home-Zone via Mesh über ein `ROAM`-Update informiert.
 * **Private Calls (Unit Calls):** Der Router prüft zuerst die lokale Gast-Registry. Ist das Ziel lokal unbekannt, wird die aktuelle Aufenthalts-Zone über die `RoamingRegistry` ermittelt und das Paket gezielt ins Mesh an den zuständigen Master geroutet.
 * **Group Calls:** Werden abhängig von der Ziel-ID ins Mesh geflutet (z. B. TG 1 an alle bekannten Master, TG 100-999 an explizite Zonen).
+
+== Zustandsgrenzen
+
+Call- und Teilnehmer-Routen verwenden beim Start vorreservierte Dictionaries. Updates vorhandener Einträge und Einfügungen bis zur konfigurierten Kapazität lösen keine Vergrößerung aus. Ist eine Tabelle voll, läuft die Paketweiterleitung weiter und nur der zusätzliche Tracking-Zustand entfällt.
+
+Frame-Events übergeben `ReadOnlySpan<byte>` synchron. Das `SdsGateway` verarbeitet den Span während des Callbacks; es wird keine vollständige DMR-Frame-Kopie erzeugt.

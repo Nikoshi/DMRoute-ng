@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace DMRoute_ng.Types;
 
 public enum RepeaterState
@@ -34,8 +32,9 @@ public sealed class Repeater(int id, string psk, RepeaterState state, RepeaterCo
     public uint RandomNumber { get; set; }
     
     public long LastPingTicks; 
+    public long LoggedInSinceTicks;
     
-    public IPEndPoint? EndPoint { get; set; }
+    public Ipv4Endpoint? EndPoint { get; set; }
     
     private volatile int[] _talkgroups = [];
     

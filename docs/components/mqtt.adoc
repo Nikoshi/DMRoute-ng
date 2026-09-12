@@ -1,48 +1,140 @@
-= MqttIntegrationService & Telemetrie
+= MQTT-Integration und Telemetrie
 :toc:
 :sectnums:
 
-== Übersicht
-Der `MqttIntegrationService` ist ein Background-Worker, der den Zustand des Netzwerks (Topologie) und Echtzeit-Ereignisse (Anrufe, SMS) asynchron und allokationsfrei über einen MQTT-Broker publiziert.
+== Zweck und Abgrenzung
 
-== Architektur & Performance
-Die Anbindung an den `MicroSubnetRouter` und das `SdsGateway` erfolgt über entkoppelte In-Memory-Kanäle (`System.Threading.Channels`). Dies stellt sicher, dass Netzwerklatenzen beim MQTT-Publishing den zeitkritischen UDP-Receive-Loop für Sprachdaten niemals blockieren. Die JSON-Serialisierung erfolgt über einen `JsonSpanBuilder` mit exakt 0 Bytes Heap-Allokation im Hot-Path.
+Der `MqttIntegrationService` veröffentlicht Zustand und Ereignisse einer Zone unter
+`dmroute/{zoneId}/`. Die Integration verwendet ausschließlich den projekteigenen
+`RawMqttClient`; es gibt keine MQTT-Bibliothek als Abhängigkeit. Alle Nachrichten
+werden mit QoS 0 gesendet.
 
-== MQTT Topic-Baum (Struktur & Status)
-Der Basis-Pfad lautet `dmroute/{zoneId}/`.
+Der Wechsel auf den hier beschriebenen Topic-Baum ist ein harter Schnitt. Die alten
+Pfade unter `calls/`, `roaming/` und `sms/` werden nicht parallel publiziert.
 
-=== 1. System & Infrastruktur (Retained, Polled)
-Zustandsdaten, die periodisch (z.B. alle 10 Sekunden) als Persistenz-Nachricht auf dem Broker aktualisiert werden.
+== Entkopplung vom Routing
 
-* `sys/info`: Allgemeine Metriken (z. B. Anzahl aktiver Hotspots).
--> *Status: Implementiert*
-* `routing/hotspots`: Liste aller Repeater inkl. RPTC-Metadaten (Callsign, Software, TX-Power, Inaktivität).
--> *Status: Bugfix ausstehend (Offset-Korrektur für Fixed-Length Structs)*
-* `routing/mesh/peers`: Liste der über WireGuard/UDP verbundenen Zonen-Master.
--> *Status: Implementiert*
-* `routing/roaming/guests`: Fremde IDs im eigenen Netz.
--> *Status: Ausstehend*
-* `routing/roaming/away`: Eigene IDs in fremden Netzen.
--> *Status: Ausstehend*
+Call-/SMS- und Diagnoseereignisse gelangen über zwei begrenzte
+`System.Threading.Channels`-Kanäle zum Background-Service. Die Trennung erlaubt
+eigene Kapazitätsgrenzen für kleine Wert-Ereignisse und kopierte Rohframes. Die Event-Handler führen
+keine Netzwerk-I/O und keine JSON-Serialisierung im UDP-Thread aus. Ist der Kanal
+voll, wird das älteste Ereignis verworfen und `droppedMqttEvents` erhöht. Während
+einer Broker-Unterbrechung bleiben damit die neuesten Ereignisse bis zur
+konfigurierten Kapazität erhalten; der ursprüngliche UTC-Zeitstempel bleibt
+unverändert.
 
-=== 2. Echtzeit-Kommunikation (Event-Driven)
-Gefeuert durch Signalisierungs-Header (DMRD).
+Diagnoseframes werden synchron aus dem geliehenen `ReadOnlySpan<byte>` in einen beim
+Start reservierten Slot kopiert. Ein verworfener Kanaleintrag gibt seinen Slot sofort
+frei. Frames über `MaxDiagnosticFrameBytes` werden auf diese Grenze gekürzt.
 
-* `call/group/{dstId}/active`: Start eines Gruppenrufs.
--> *Status: Implementiert. (To-Do: Timeout/Status-Tracking hinzufügen, um unsauber beendete Calls korrekt als "beendet" zu markieren).*
-* `call/group/{dstId}/event`: Ende eines Gruppenrufs inkl. Historie.
--> *Status: Implementiert*
-* `call/private/{dstId}/active`: Start eines Privatrufs.
--> *Status: Implementiert*
-* `call/private/{dstId}/event`: Ende eines Privatrufs.
--> *Status: Implementiert*
+Der Publisher besitzt getrennte, wiederverwendete Topic- und JSON-Puffer für den
+Event- und Zustands-Loop. MQTT-Netzwerklatenz kann dadurch den DMR-Empfang nicht
+blockieren. Fertig dekodierte SMS-Strings sowie Background- und Verbindungsarbeit
+gehören nicht zur harten Allokationsgarantie.
 
-=== 3. Daten-Dienste & Diagnose (Event-Driven)
-Gefeuert durch den SDS-Decoder oder den Fallback-Zweig des Routers.
+== Konfiguration
 
-* `sds/sms`: Dekodierte Textnachrichten (enthält `srcId`, `dstId` und `message`).
--> *Status: Bugfix ausstehend (Dynamisches UTF-16LE / UTF-8 Encoding).*
-* `sds/aprs`: Extrahierte APRS-Positionsdaten aus CSBK-Frames (ID 990099).
--> *Status: Parsing ausstehend.*
-* `diag/unknown_frame`: Hex-Dump nicht verarbeiteter DMR-Protokolldaten für Reverse Engineering.
--> *Status: Implementiert*
+[cols="2,1,3",options="header"]
+|===
+|Schlüssel |Standard |Bedeutung
+
+|`Mqtt:Host`
+|kein Standard
+|Broker-Hostname oder IPv4-Adresse; erforderlich
+
+|`Mqtt:Port`
+|`1883`
+|TCP-Port des Brokers
+
+|`Mqtt:StateIntervalSeconds`
+|`10`
+|Intervall für den vollständigen Zustandsabgleich
+
+|`Mqtt:EventCapacity`
+|`1000`
+|Maximale Zahl gepufferter Ereignisse; Überlaststrategie `DropOldest`
+
+|`Mqtt:DiagnosticFrameCapacity`
+|`128`
+|Maximale Zahl gepufferter Diagnoseframes; Überlaststrategie `DropOldest`. Zwei zusätzliche vorab reservierte Slots decken den gerade publizierten und den neu eingereihten Frame ab.
+
+|`Mqtt:MaxDiagnosticFrameBytes`
+|`1024`
+|Maximal kopierte Rohdaten pro Diagnoseframe
+
+|`Mqtt:PayloadBufferBytes`
+|`32768`
+|Größe je wiederverwendetem JSON-Puffer; mindestens 32768
+|===
+
+Benutzername, Passwort und TLS sind noch nicht Bestandteil der Raw-Implementierung.
+
+== Retained Zustände
+
+Nach jedem erfolgreichen CONNECT und anschließend alle
+`StateIntervalSeconds` publiziert der Service einen vollständigen Abgleich. Eine
+verschwundene Entität wird durch ein retained Publish mit leerem Payload gelöscht.
+Jede Entität besitzt ein eigenes Topic, damit eine Änderung keine großen
+JSON-Arrays erzeugt.
+
+=== Master
+
+`dmroute/{zoneId}/sys/info` enthält:
+
+* `zoneId`, `uptimeSec` und `version`
+* `activeCalls` und `memoryUsageMb`
+* `droppedMqttEvents`
+* `timestamp` als ISO-8601 UTC
+
+=== Hotspots und Mesh
+
+`dmroute/{zoneId}/routing/hotspots/{repeaterId}` enthält `repeaterId`,
+`householdId`, `endpoint`, `uptimeSec`, `state` und `lastPingSecAgo`. Der
+`hotspotId` beziehungsweise `repeaterId` wird aus dem authentifizierten
+Homebrew-Paket übernommen; er ist nicht als Geräte-ID im Code hinterlegt.
+`householdId` wird als `repeaterId / 100` berechnet. Auch die Zustände
+`ChallengeSent` und `Disconnected` werden veröffentlicht.
+
+`dmroute/{zoneId}/routing/mesh/peers/{peerZoneId}` enthält `zoneId`, `endpoint`,
+`lastSeenSecAgo` und `status`. Die `MasterRegistry` enthält nur noch nicht
+abgelaufene Peers, daher lautet der veröffentlichte Status `Online`.
+
+=== Roaming
+
+`dmroute/{zoneId}/routing/roaming/guests/{deviceId}` enthält `deviceId`,
+`homeZone`, `connectedViaHotspot`, `activeSinceMin` und `lastSeenSecAgo`.
+
+`dmroute/{zoneId}/routing/roaming/away/{deviceId}` enthält `deviceId`,
+`currentForeignZone` und `lastUpdateSecAgo`.
+
+Nur aktive Roaming-Einträge werden publiziert. Der periodische Abgleich entfernt
+retained Topics, sobald die Registry den Eintrag wegen Inaktivität löscht.
+
+=== Aktive Calls
+
+`dmroute/{zoneId}/call/active/{srcId}` hält den aktuellen Call dieser Quell-ID.
+Der Payload enthält `srcId`, `dstId`, `type`, `hotspotId` und den Startzeitpunkt in
+`timestamp`. Ein Rufende oder Timeout löscht das Topic mit leerem retained Payload.
+Aktive Calls werden nach einem MQTT-Reconnect aus dem Router-Snapshot rekonstruiert.
+
+== Ereignisse
+
+Diese Topics sind nicht retained:
+
+* `dmroute/{zoneId}/call/active` wird unmittelbar beim Voice-Header publiziert.
+  Der Payload entspricht dem retained aktiven Call.
+* `dmroute/{zoneId}/call/event` wird nach Terminator oder Timeout publiziert. Neben
+  den Call-Feldern enthält er `durationSec` mit drei Nachkommastellen und
+  `endReason` mit `Terminated` oder `Timeout`.
+* `dmroute/{zoneId}/sds/sms` enthält `srcId`, `dstId`, `message` und `timestamp`.
+* `dmroute/{zoneId}/diag/unknown_frame` enthält `srcId`, die tatsächliche
+  `hotspotId`, `dataTypeHex`, `hexDump` und `timestamp`. Noch nicht dekodierte APRS-
+  Frames werden ebenfalls hier mit Datentyp `0x03` sichtbar gemacht.
+
+`dmroute/{zoneId}/sds/gps` ist für einen späteren, fachlich geprüften GPS-Decoder
+reserviert und wird derzeit nicht publiziert.
+
+Zeitstempel sind ISO-8601 UTC. `type` lautet `GroupCall` oder `PrivateCall`.
+Kann ein QoS-0-Publish wegen eines Verbindungsabbruchs nicht abgeschlossen werden,
+kann das gerade entnommene Ereignis verloren gehen. Retained Zustand wird nach dem
+nächsten CONNECT erneut aus den Registries aufgebaut.

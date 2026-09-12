@@ -3,14 +3,18 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using DMRoute_ng.Registry;
+using DMRoute_ng.Types;
 
 namespace DMRoute_ng.Core;
 
 public sealed class MeshDiscoveryService : BackgroundService
 {
+    private readonly record struct LocationUpdate(int DeviceId, Ipv4Endpoint Target);
+
     private readonly ILogger<MeshDiscoveryService> _logger;
     private readonly MasterRegistry _masterRegistry;
     private readonly RoamingRegistry _roamingRegistry; // Neu
@@ -20,6 +24,16 @@ public sealed class MeshDiscoveryService : BackgroundService
     private readonly byte[] _meshPskBytes;
 
     private readonly Socket _socket;
+    private readonly Channel<LocationUpdate> _locationUpdates = Channel.CreateBounded<LocationUpdate>(
+        new BoundedChannelOptions(256)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait
+        });
+    private long _droppedLocationUpdates;
+
+    public long DroppedLocationUpdates => Interlocked.Read(ref _droppedLocationUpdates);
 
     public MeshDiscoveryService(ILogger<MeshDiscoveryService> logger, MasterRegistry masterRegistry, RoamingRegistry roamingRegistry,
         int myZoneId, ushort myDataPort, int discoveryPort, string meshPsk)
@@ -42,21 +56,38 @@ public sealed class MeshDiscoveryService : BackgroundService
     {
         _logger.LogInformation("Mesh: Discovery Service für Zone {Zone} auf UDP {Port} gestartet", _myZoneId, _discoveryPort);
 
-        _ = Task.Run(() => BroadcastLoopAsync(stoppingToken), stoppingToken);
+        var broadcastTask = BroadcastLoopAsync(stoppingToken);
+        var locationUpdateTask = LocationUpdateLoopAsync(stoppingToken);
 
         var buffer = new byte[1024];
         EndPoint remoteEp = new IPEndPoint(IPAddress.Any, 0);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, remoteEp, stoppingToken);
+                    ProcessPacket(buffer.AsSpan(0, result.ReceivedBytes), (IPEndPoint)result.RemoteEndPoint);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Fehler beim Empfang eines Mesh-Pakets");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        finally
         {
             try
             {
-                var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, remoteEp);
-                ProcessPacket(buffer.AsSpan(0, result.ReceivedBytes), (IPEndPoint)result.RemoteEndPoint);
+                await Task.WhenAll(broadcastTask, locationUpdateTask);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogError(ex, "Fehler beim Empfang eines Mesh-Pakets");
             }
         }
     }
@@ -79,28 +110,44 @@ public sealed class MeshDiscoveryService : BackgroundService
         }
     }
 
-    public async Task SendLocationUpdateAsync(int deviceId, IPAddress targetAddress)
+    public bool QueueLocationUpdate(int deviceId, Ipv4Endpoint target)
     {
-        var targetEndpoint = new IPEndPoint(targetAddress, _discoveryPort);
+        target = new Ipv4Endpoint(target.Address, checked((ushort)_discoveryPort));
+        if (_locationUpdates.Writer.TryWrite(new LocationUpdate(deviceId, target))) return true;
+        Interlocked.Increment(ref _droppedLocationUpdates);
+        return false;
+    }
 
+    public Task SendLocationUpdateAsync(int deviceId, IPAddress targetAddress)
+    {
+        QueueLocationUpdate(deviceId,
+            Ipv4Endpoint.FromIPEndPoint(new IPEndPoint(targetAddress, _discoveryPort)));
+        return Task.CompletedTask;
+    }
+
+    private async Task LocationUpdateLoopAsync(CancellationToken token)
+    {
         var packet = new byte[52];
-        "ROAM"u8.ToArray().CopyTo(packet, 0);
-        BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(4, 4), deviceId);
-        BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(8, 4), _myZoneId);
-        BinaryPrimitives.WriteInt64BigEndian(packet.AsSpan(12, 8), DateTime.UtcNow.Ticks);
+        var targetAddress = new SocketAddress(AddressFamily.InterNetwork, 16);
+        "ROAM"u8.CopyTo(packet);
 
-        HMACSHA256.HashData(_meshPskBytes, packet.AsSpan(0, 20), packet.AsSpan(20, 32));
+        await foreach (var update in _locationUpdates.Reader.ReadAllAsync(token))
+        {
+            BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(4, 4), update.DeviceId);
+            BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(8, 4), _myZoneId);
+            BinaryPrimitives.WriteInt64BigEndian(packet.AsSpan(12, 8), DateTime.UtcNow.Ticks);
+            HMACSHA256.HashData(_meshPskBytes, packet.AsSpan(0, 20), packet.AsSpan(20, 32));
+            update.Target.WriteTo(targetAddress);
 
-        try
-        {
-            using var unicastClient = new UdpClient();
-            await unicastClient.SendAsync(packet, targetEndpoint);
-            
-            _logger.LogDebug("ROAM Update für ID {DeviceId} an {IP} gesendet", deviceId, targetAddress);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Fehler beim Senden des ROAM-Updates");
+            try
+            {
+                await _socket.SendToAsync(packet, SocketFlags.None, targetAddress, token);
+                _logger.LogDebug("ROAM Update für ID {DeviceId} gesendet", update.DeviceId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Fehler beim Senden des ROAM-Updates");
+            }
         }
     }
 
@@ -136,7 +183,7 @@ public sealed class MeshDiscoveryService : BackgroundService
 
         if (!CryptographicOperations.FixedTimeEquals(computedHash, payload.Slice(18, 32))) return;
         
-        var dataEndpoint = new IPEndPoint(remote.Address, remoteDataPort);
+        var dataEndpoint = Ipv4Endpoint.FromIPEndPoint(new IPEndPoint(remote.Address, remoteDataPort));
         
         if (_masterRegistry.AddOrUpdate(remoteZone, dataEndpoint))
         {
@@ -166,5 +213,11 @@ public sealed class MeshDiscoveryService : BackgroundService
         }
 
         _roamingRegistry.UpdateDeviceLocation(deviceId, foreignZoneId);
+    }
+
+    public override void Dispose()
+    {
+        _socket.Dispose();
+        base.Dispose();
     }
 }

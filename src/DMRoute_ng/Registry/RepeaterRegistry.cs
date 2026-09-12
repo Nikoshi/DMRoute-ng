@@ -9,8 +9,9 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
     : BackgroundService
 {
     private readonly ConcurrentDictionary<int, Repeater> _repeaters = new();
+    private volatile Repeater[] _routingSnapshot = [];
 
-    // Zero-Allocation Lookup & Dynamisches Whitelisting
+    // Dynamisches Whitelisting; nur aus dem RPTL-Anmeldepfad aufrufen.
     public bool TryGet(int repeaterId, out Repeater repeater)
     {
         if (_repeaters.TryGetValue(repeaterId, out var existing))
@@ -37,8 +38,27 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
         return false;
     }
 
+    public bool TryGetExisting(int repeaterId, out Repeater repeater) =>
+        _repeaters.TryGetValue(repeaterId, out repeater!);
+
     // Liefert das Dictionary zurück, damit Caller den Struct-Enumerator (Zero-Alloc) nutzen können
     public ConcurrentDictionary<int, Repeater> GetAll() => _repeaters;
+
+    public ReadOnlySpan<Repeater> GetRoutingSnapshot() => _routingSnapshot;
+
+    public void RefreshRoutingSnapshot()
+    {
+        var snapshot = new Repeater[_repeaters.Count];
+        var count = 0;
+        foreach (var pair in _repeaters)
+        {
+            if (count == snapshot.Length) Array.Resize(ref snapshot, count + 1);
+            snapshot[count++] = pair.Value;
+        }
+
+        if (count != snapshot.Length) Array.Resize(ref snapshot, count);
+        _routingSnapshot = snapshot;
+    }
     
     // ReSharper disable once CognitiveComplexity
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -49,7 +69,6 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
         {
             long cutoffTicks = DateTime.UtcNow.AddSeconds(-45).Ticks;
 
-            // foreach auf ConcurrentDictionary nutzt implizit einen Struct-Enumerator -> 0 Bytes GC Allokation
             foreach (var kvp in _repeaters)
             {
                 var repeater = kvp.Value;
@@ -64,6 +83,7 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
                         
                         repeater.State = RepeaterState.Disconnected;
                         Volatile.Write(ref repeater.LastPingTicks, 0);
+                        Volatile.Write(ref repeater.LoggedInSinceTicks, 0);
                     }
                 }
             }
