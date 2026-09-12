@@ -119,7 +119,7 @@ START: GroupCall von 10001 an 9
 ENDE: GroupCall von 10001 an 9 (sauber beendet)
 ----
 
-MQTT veröffentlicht `dmroute/100/calls/active/9/10001`, löscht das retained Active-Topic nach Rufende mit leerem Payload und veröffentlicht `dmroute/100/calls/history/9/10001`.
+MQTT veröffentlicht den Start nicht-retained unter `dmroute/100/call/active` und retained unter `dmroute/100/call/active/10001`. Nach dem Rufende löscht ein leerer retained Payload das Teilnehmer-Topic; `dmroute/100/call/event` enthält anschließend Dauer und Endegrund.
 
 Im Mitschnitt müssen DMRD-Pakete vom Hotspot zum Master sichtbar sein. Es werden für diesen Gruppenruf keine DMRD-Pakete vom Master zum selben Hotspot erwartet.
 
@@ -129,7 +129,7 @@ Im Mitschnitt müssen DMRD-Pakete vom Hotspot zum Master sichtbar sein. Es werde
 . PTT etwa drei Sekunden halten und dann loslassen.
 . Fünf Sekunden warten.
 
-Erwartet werden `START` und `ENDE` für `GroupCall von 10101 an 9`. Zusätzlich legt MQTT das retained Topic `dmroute/100/roaming/guests/10101` an. Damit ist nachgewiesen, dass die fremde Teilnehmer-ID als Gast der Zone 101 erfasst wurde.
+Erwartet werden `START` und `ENDE` für `GroupCall von 10101 an 9`. Zusätzlich legt MQTT das retained Topic `dmroute/100/routing/roaming/guests/10101` an. Dessen Feld `connectedViaHotspot` muss die tatsächlich angemeldete Repeater-ID enthalten. Damit ist nachgewiesen, dass die fremde Teilnehmer-ID als Gast der Zone 101 erfasst wurde.
 
 === H04: Private Call 10001 nach 10101
 
@@ -182,7 +182,7 @@ SMS von 10001 an 10101 (...): DMR TEST 1
 SMS von 10101 an 10001 (...): DMR TEST 2
 ----
 
-MQTT veröffentlicht entsprechend `dmroute/100/sms/10101/10001` und `dmroute/100/sms/10001/10101`. Im Mitschnitt werden die zugehörigen DMRD-Datenframes sowie die Rückleitung vom Master zum Hotspot geprüft. Damit werden Transport, Reassembly und Textdekodierung getrennt bewertet. Falls der Transport sichtbar ist, aber Log oder MQTT-Text fehlt, ist das ein konkreter SDS-Kompatibilitäts- oder Decoderfehler und kein allgemeiner Verbindungsfehler.
+MQTT veröffentlicht beide Nachrichten nicht-retained unter `dmroute/100/sds/sms`; `srcId` und `dstId` im JSON-Payload unterscheiden die Richtung. Im Mitschnitt werden die zugehörigen DMRD-Datenframes sowie die Rückleitung vom Master zum Hotspot geprüft. Damit werden Transport, Reassembly und Textdekodierung getrennt bewertet. Falls der Transport sichtbar ist, aber Log oder MQTT-Text fehlt, ist das ein konkreter SDS-Kompatibilitäts- oder Decoderfehler und kein allgemeiner Verbindungsfehler.
 
 Bei einem Fehler der bestätigten Übertragung kann zusätzlich eine unbestätigte Gruppen-SDS an TG 9 gesendet werden. Erreichen deren Datenblöcke den Master, sind Encoder und Decoder grundsätzlich kompatibel und der Fehler ist auf den Confirmed-Handshake einzugrenzen.
 

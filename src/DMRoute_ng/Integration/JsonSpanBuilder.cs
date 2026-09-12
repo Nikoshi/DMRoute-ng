@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Buffers;
 
 namespace DMRoute_ng.Integration;
 
@@ -60,7 +61,38 @@ public ref struct JsonSpanBuilder
         _offset += written;
     }
 
-    public void AppendString(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+    public void AppendDecimal(ReadOnlySpan<byte> key, double value)
+    {
+        AppendKey(key);
+        if (!Utf8Formatter.TryFormat(value, _buffer[_offset..], out var written, new StandardFormat('F', 3)))
+            throw new ArgumentException("JSON buffer is too small.");
+        _offset += written;
+    }
+
+    public void AppendTimestamp(ReadOnlySpan<byte> key, long utcTicks)
+    {
+        AppendKey(key);
+        WriteByte((byte)'\"');
+        var value = new DateTime(utcTicks, DateTimeKind.Utc);
+        if (!Utf8Formatter.TryFormat(value, _buffer[_offset..], out var written, new StandardFormat('O')))
+            throw new ArgumentException("JSON buffer is too small.");
+        _offset += written;
+        WriteByte((byte)'\"');
+    }
+
+    public void AppendHexString(ReadOnlySpan<byte> key, scoped ReadOnlySpan<byte> value)
+    {
+        AppendKey(key);
+        WriteByte((byte)'\"');
+        foreach (var b in value)
+        {
+            WriteHexNibble(b >> 4);
+            WriteHexNibble(b);
+        }
+        WriteByte((byte)'\"');
+    }
+
+    public void AppendString(ReadOnlySpan<byte> key, scoped ReadOnlySpan<byte> value)
     {
         AppendKey(key);
         WriteByte((byte)'"');

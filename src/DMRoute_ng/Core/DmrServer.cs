@@ -131,7 +131,9 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
             if (CryptographicOperations.FixedTimeEquals(calculatedHash, receivedHash))
             {
                 repeater.State = RepeaterState.LoggedIn;
-                Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
+                var now = DateTime.UtcNow.Ticks;
+                Volatile.Write(ref repeater.LastPingTicks, now);
+                Volatile.Write(ref repeater.LoggedInSinceTicks, now);
                 registry.RefreshRoutingSnapshot();
                 SendRptAck((uint)repeaterId, endPoint);
             }
@@ -158,6 +160,7 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
             {
                 logger.LogInformation("Soft-Reconnect durch Ping für Repeater {RepeaterId}", repeaterId);
                 repeater.State = RepeaterState.LoggedIn;
+                Volatile.Write(ref repeater.LoggedInSinceTicks, DateTime.UtcNow.Ticks);
                 registry.RefreshRoutingSnapshot();
             }
 
@@ -187,6 +190,7 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
             logger.LogInformation("<-- RPTCL (Disconnect) von ID {RepeaterId}", repeaterId);
             repeater.State = RepeaterState.Disconnected;
             Volatile.Write(ref repeater.LastPingTicks, 0);
+            Volatile.Write(ref repeater.LoggedInSinceTicks, 0);
             registry.RefreshRoutingSnapshot();
             return;
         }

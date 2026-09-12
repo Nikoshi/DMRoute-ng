@@ -1,7 +1,6 @@
-﻿using System.Threading.Channels;
-using DMRoute_ng.Core;
+﻿using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
-using DMRoute_ng.Integration; // NEU
+using DMRoute_ng.Integration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using DMRoute_ng.Registry;
@@ -34,7 +33,6 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<MasterRegistry>())
 
 builder.Services.AddSingleton<RoamingRegistry>(sp => new RoamingRegistry(
     sp.GetRequiredService<ILogger<RoamingRegistry>>(),
-    sp.GetRequiredService<ChannelWriter<MqttEvent>>(),
     maxLocalDeviceRoutes));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RoamingRegistry>());
 
@@ -81,17 +79,6 @@ builder.Services.AddSingleton<RawMqttClient>(sp =>
     var clientId = System.Text.Encoding.UTF8.GetBytes($"dmroute_{myZoneId}_{Random.Shared.Next(1000, 9999)}");
     return new RawMqttClient(clientId);
 });
-
-builder.Services.AddSingleton(Channel.CreateBounded<MqttEvent>(new BoundedChannelOptions(1000)
-{
-    SingleReader = true,
-    SingleWriter = false,
-    FullMode = BoundedChannelFullMode.DropOldest
-}));
-
-// Mappings für DI-Auflösung hinzufügen
-builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<MqttEvent>>().Writer);
-builder.Services.AddSingleton(sp => sp.GetRequiredService<Channel<MqttEvent>>().Reader);
 
 builder.Services.AddHostedService<MqttIntegrationService>();
 

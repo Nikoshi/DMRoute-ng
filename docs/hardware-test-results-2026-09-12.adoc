@@ -43,11 +43,11 @@ Server-Log, MQTT-Log und PCAP wurden während des Laufs unter `/tmp/dmroute-hard
 
 |H02 Gruppenruf `10001` nach TG 9
 |Bestanden
-|Start, sauberes Ende, MQTT Active/History und retained Löschung wurden bestätigt. Gruppen-DMRD wurde nicht an den Ursprungs-Hotspot zurückgesendet.
+|Start, sauberes Ende, MQTT Active/History und retained Löschung im damals implementierten Topic-Baum wurden bestätigt. Gruppen-DMRD wurde nicht an den Ursprungs-Hotspot zurückgesendet.
 
 |H03 Gast `10101` nach TG 9
 |Bestanden
-|Start und sauberes Ende wurden erkannt. MQTT veröffentlichte retained `dmroute/100/roaming/guests/10101`.
+|Start und sauberes Ende wurden erkannt. MQTT veröffentlichte retained das damalige Topic `dmroute/100/roaming/guests/10101`.
 
 |H04 Private Call `10001` nach `10101`
 |Bestanden
@@ -63,7 +63,7 @@ Server-Log, MQTT-Log und PCAP wurden während des Laufs unter `/tmp/dmroute-hard
 
 |H07 Confirmed SDS `10001` nach `10101`
 |Bestanden
-|DMR-Datenheader und Datenblöcke wurden in beiden IP-Richtungen aufgezeichnet. Der Gateway dekodierte UTF-16LE (`0x04`) exakt als `DMR TEST 1`; MQTT veröffentlichte `dmroute/100/sms/10101/10001`.
+|DMR-Datenheader und Datenblöcke wurden in beiden IP-Richtungen aufgezeichnet. Der Gateway dekodierte UTF-16LE (`0x04`) exakt als `DMR TEST 1`; MQTT veröffentlichte das damalige Topic `dmroute/100/sms/10101/10001`.
 
 |H07 Confirmed SDS `10101` nach `10001`
 |Teilweise
@@ -71,7 +71,7 @@ Server-Log, MQTT-Log und PCAP wurden während des Laufs unter `/tmp/dmroute-hard
 
 |SDS-Diagnose `10101` nach TG 9
 |Bestanden
-|Die unbestätigte Gruppen-SDS `DMR TEST TG` wurde vom selben Retevis-Gerät vollständig übertragen, als UTF-16LE dekodiert und unter `dmroute/100/sms/9/10101` publiziert. Das grenzt den vorherigen Fehler auf den Confirmed-Handshake der Gegenrichtung ein.
+|Die unbestätigte Gruppen-SDS `DMR TEST TG` wurde vom selben Retevis-Gerät vollständig übertragen, als UTF-16LE dekodiert und unter dem damaligen Topic `dmroute/100/sms/9/10101` publiziert. Das grenzt den vorherigen Fehler auf den Confirmed-Handshake der Gegenrichtung ein.
 |===
 
 Ein zusätzlicher Gruppenruf von `10001` verlor seinen Terminator und wurde nach sieben Sekunden korrekt als Call-Timeout beendet. Mehrere APRS-CSBK-Pakete von `10001` wurden ebenfalls erkannt.

@@ -83,6 +83,7 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
                         
                         repeater.State = RepeaterState.Disconnected;
                         Volatile.Write(ref repeater.LastPingTicks, 0);
+                        Volatile.Write(ref repeater.LoggedInSinceTicks, 0);
                     }
                 }
             }

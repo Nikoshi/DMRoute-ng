@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Buffers.Text;
 using System.Net;
 using System.Net.Sockets;
 
@@ -63,6 +64,37 @@ public readonly struct Ipv4Endpoint(uint address, ushort port) : IEquatable<Ipv4
     }
 
     public IPEndPoint ToIPEndPoint() => new(ToIPAddress(), Port);
+
+    public bool TryFormatUtf8(Span<byte> destination, out int bytesWritten)
+    {
+        bytesWritten = 0;
+        if (!TryAppendNumber(destination, ref bytesWritten, (byte)(Address >> 24)) || !TryAppendByte(destination, ref bytesWritten, (byte)'.') ||
+            !TryAppendNumber(destination, ref bytesWritten, (byte)(Address >> 16)) || !TryAppendByte(destination, ref bytesWritten, (byte)'.') ||
+            !TryAppendNumber(destination, ref bytesWritten, (byte)(Address >> 8)) || !TryAppendByte(destination, ref bytesWritten, (byte)'.') ||
+            !TryAppendNumber(destination, ref bytesWritten, (byte)Address) || !TryAppendByte(destination, ref bytesWritten, (byte)':') ||
+            !Utf8Formatter.TryFormat(Port, destination[bytesWritten..], out var portLength))
+        {
+            bytesWritten = 0;
+            return false;
+        }
+
+        bytesWritten += portLength;
+        return true;
+    }
+
+    private static bool TryAppendNumber(Span<byte> destination, ref int offset, byte value)
+    {
+        if (!Utf8Formatter.TryFormat(value, destination[offset..], out var length)) return false;
+        offset += length;
+        return true;
+    }
+
+    private static bool TryAppendByte(Span<byte> destination, ref int offset, byte value)
+    {
+        if (offset == destination.Length) return false;
+        destination[offset++] = value;
+        return true;
+    }
 
     public bool Equals(Ipv4Endpoint other) => Address == other.Address && Port == other.Port;
     public override bool Equals(object? obj) => obj is Ipv4Endpoint other && Equals(other);

@@ -32,6 +32,7 @@ public sealed class Repeater(int id, string psk, RepeaterState state, RepeaterCo
     public uint RandomNumber { get; set; }
     
     public long LastPingTicks; 
+    public long LoggedInSinceTicks;
     
     public Ipv4Endpoint? EndPoint { get; set; }
     

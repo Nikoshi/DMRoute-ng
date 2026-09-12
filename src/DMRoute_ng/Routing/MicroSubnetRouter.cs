@@ -7,17 +7,66 @@ using Microsoft.Extensions.Logging;
 namespace DMRoute_ng.Routing;
 
 public delegate void DmrDataFrameHandler(ReadOnlySpan<byte> packet);
-public delegate void DmrUnknownFrameHandler(ReadOnlySpan<byte> packet, int sourceId, byte dataType);
-public delegate void DmrAprsFrameHandler(int sourceId, ReadOnlySpan<byte> packet);
+public delegate void DmrCallEventHandler(in DmrCallEvent callEvent);
+public delegate void DmrUnknownFrameHandler(ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks);
+public delegate void DmrAprsFrameHandler(int sourceId, int hotspotId, ReadOnlySpan<byte> packet, long occurredAtTicks);
+
+public enum DmrCallEventType : byte
+{
+    Started,
+    Ended,
+    TimedOut
+}
+
+public readonly struct DmrCallEvent(
+    int sourceId,
+    int destinationId,
+    int hotspotId,
+    bool isGroupCall,
+    DmrCallEventType eventType,
+    long occurredAtTicks,
+    long durationTicks = 0)
+{
+    public int SourceId { get; } = sourceId;
+    public int DestinationId { get; } = destinationId;
+    public int HotspotId { get; } = hotspotId;
+    public bool IsGroupCall { get; } = isGroupCall;
+    public DmrCallEventType EventType { get; } = eventType;
+    public long OccurredAtTicks { get; } = occurredAtTicks;
+    public long DurationTicks { get; } = durationTicks;
+}
+
+public readonly struct ActiveCallSnapshot(
+    int sourceId,
+    int destinationId,
+    int hotspotId,
+    bool isGroupCall,
+    long startedAtTicks)
+{
+    public int SourceId { get; } = sourceId;
+    public int DestinationId { get; } = destinationId;
+    public int HotspotId { get; } = hotspotId;
+    public bool IsGroupCall { get; } = isGroupCall;
+    public long StartedAtTicks { get; } = startedAtTicks;
+}
 
 public sealed partial class MicroSubnetRouter : IDisposable
 {
-    private readonly struct CallState(int dstId, bool isGroupCall, long startTicks, long ticks, bool pendingTermination = false)
+    private readonly struct CallState(
+        int dstId,
+        int hotspotId,
+        bool isGroupCall,
+        long startTicks,
+        long lastFrameTicks,
+        long terminationTicks = 0,
+        bool pendingTermination = false)
     {
         public readonly int DstId = dstId;
+        public readonly int HotspotId = hotspotId;
         public readonly bool IsGroupCall = isGroupCall;
         public readonly long StartTicks = startTicks;
-        public readonly long Ticks = ticks;
+        public readonly long LastFrameTicks = lastFrameTicks;
+        public readonly long TerminationTicks = terminationTicks;
         public readonly bool PendingTermination = pendingTermination;
     }
 
@@ -46,12 +95,21 @@ public sealed partial class MicroSubnetRouter : IDisposable
     private long _droppedCallStates;
 
     public event DmrDataFrameHandler? OnDataFrameReceived;
-    public event Action<int, int, bool, byte, int>? OnSignalingReceived;
+    public event DmrCallEventHandler? OnCallEvent;
     public event DmrUnknownFrameHandler? OnUnknownFrameReceived;
     public event DmrAprsFrameHandler? OnAprsReceived;
 
     public long DroppedLocalRouteStates => Interlocked.Read(ref _droppedLocalRouteStates);
     public long DroppedCallStates => Interlocked.Read(ref _droppedCallStates);
+    public int MaxActiveCalls => _maxActiveCalls;
+
+    public int ActiveCallCount
+    {
+        get
+        {
+            lock (_activeCallsLock) return _activeCalls.Count;
+        }
+    }
 
     public MicroSubnetRouter(
         ILogger<MicroSubnetRouter> logger,
@@ -116,7 +174,7 @@ public sealed partial class MicroSubnetRouter : IDisposable
             }
             else
             {
-                _roamingRegistry.TrackLocalGuest(srcId, sourceRepeater!.EndPoint!.Value);
+                _roamingRegistry.TrackLocalGuest(srcId, repeaterId, sourceRepeater!.EndPoint!.Value);
                 if (dataType is 0x01 or 0x03 && _masterRegistry.TryGet(sourceHomeZone, out var homeMaster))
                 {
                     _meshService.QueueLocationUpdate(srcId, homeMaster.DataEndPoint);
@@ -124,7 +182,7 @@ public sealed partial class MicroSubnetRouter : IDisposable
             }
         }
 
-        HandleSignaling(packet, srcId, dstId, isGroupCall, dataType);
+        HandleSignaling(packet, srcId, dstId, repeaterId, isGroupCall, dataType);
         if (isDataFrame) OnDataFrameReceived?.Invoke(packet);
 
         if (isGroupCall)
@@ -197,7 +255,33 @@ public sealed partial class MicroSubnetRouter : IDisposable
         _localDeviceRouting.Add(sourceId, repeaterId);
     }
 
-    private void HandleSignaling(ReadOnlySpan<byte> packet, int srcId, int dstId, bool isGroupCall, byte dataType)
+    public int CopyActiveCalls(Span<ActiveCallSnapshot> destination)
+    {
+        var count = 0;
+        lock (_activeCallsLock)
+        {
+            foreach (var pair in _activeCalls)
+            {
+                if (count == destination.Length) break;
+                var state = pair.Value;
+                destination[count++] = new ActiveCallSnapshot(
+                    pair.Key,
+                    state.DstId,
+                    state.HotspotId,
+                    state.IsGroupCall,
+                    state.StartTicks);
+            }
+        }
+        return count;
+    }
+
+    private void HandleSignaling(
+        ReadOnlySpan<byte> packet,
+        int srcId,
+        int dstId,
+        int hotspotId,
+        bool isGroupCall,
+        byte dataType)
     {
         var now = DateTime.UtcNow.Ticks;
         var publishStart = false;
@@ -209,11 +293,16 @@ public sealed partial class MicroSubnetRouter : IDisposable
                 {
                     if (_activeCalls.TryGetValue(srcId, out var existing))
                     {
-                        _activeCalls[srcId] = new CallState(dstId, isGroupCall, existing.StartTicks, now);
+                        _activeCalls[srcId] = new CallState(
+                            dstId,
+                            hotspotId,
+                            isGroupCall,
+                            existing.StartTicks,
+                            now);
                     }
                     else if (_activeCalls.Count < _maxActiveCalls)
                     {
-                        _activeCalls.Add(srcId, new CallState(dstId, isGroupCall, now, now));
+                        _activeCalls.Add(srcId, new CallState(dstId, hotspotId, isGroupCall, now, now));
                         publishStart = true;
                     }
                     else
@@ -225,37 +314,57 @@ public sealed partial class MicroSubnetRouter : IDisposable
                 if (publishStart)
                 {
                     LogCallStart(_logger, isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
-                    OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType, 0);
+                    var callEvent = new DmrCallEvent(
+                        srcId,
+                        dstId,
+                        hotspotId,
+                        isGroupCall,
+                        DmrCallEventType.Started,
+                        now);
+                    OnCallEvent?.Invoke(in callEvent);
                 }
                 break;
             case 0x02:
                 lock (_activeCallsLock)
                 {
                     if (_activeCalls.TryGetValue(srcId, out var active))
-                        _activeCalls[srcId] = new CallState(active.DstId, active.IsGroupCall, active.StartTicks, now, true);
+                        _activeCalls[srcId] = new CallState(
+                            active.DstId,
+                            active.HotspotId,
+                            active.IsGroupCall,
+                            active.StartTicks,
+                            now,
+                            now,
+                            true);
                 }
                 break;
             case 0x03:
                 if (dstId == 990099)
                 {
                     LogAprs(_logger, srcId);
-                    OnAprsReceived?.Invoke(srcId, packet);
+                    OnAprsReceived?.Invoke(srcId, hotspotId, packet, now);
                 }
                 else
                 {
                     LogCsbk(_logger, srcId, dstId);
-                    OnSignalingReceived?.Invoke(srcId, dstId, isGroupCall, dataType, 0);
                 }
                 break;
             case <= 0x08:
                 lock (_activeCallsLock)
                 {
                     if (_activeCalls.TryGetValue(srcId, out var current))
-                        _activeCalls[srcId] = new CallState(current.DstId, current.IsGroupCall, current.StartTicks, now);
+                        _activeCalls[srcId] = new CallState(
+                            current.DstId,
+                            current.HotspotId,
+                            current.IsGroupCall,
+                            current.StartTicks,
+                            now,
+                            current.TerminationTicks,
+                            current.PendingTermination);
                 }
                 break;
             default:
-                OnUnknownFrameReceived?.Invoke(packet, srcId, dataType);
+                OnUnknownFrameReceived?.Invoke(packet, srcId, hotspotId, dataType, now);
                 break;
         }
     }
@@ -270,7 +379,7 @@ public sealed partial class MicroSubnetRouter : IDisposable
             foreach (var pair in _activeCalls)
             {
                 var call = pair.Value;
-                var elapsed = currentTicks - call.Ticks;
+                var elapsed = currentTicks - call.LastFrameTicks;
                 var eventType = call.PendingTermination && elapsed > TimeSpan.FromMilliseconds(1500).Ticks
                     ? (byte)0x02
                     : !call.PendingTermination && elapsed > TimeSpan.FromSeconds(3).Ticks
@@ -285,12 +394,23 @@ public sealed partial class MicroSubnetRouter : IDisposable
         for (var i = 0; i < count; i++)
         {
             var expired = _expiredCalls[i];
-            var duration = (int)((currentTicks - expired.State.StartTicks) / TimeSpan.TicksPerSecond);
+            var endedAtTicks = expired.EventType == 0x02
+                ? expired.State.TerminationTicks
+                : expired.State.LastFrameTicks;
+            var durationTicks = Math.Max(0, endedAtTicks - expired.State.StartTicks);
             if (expired.EventType == 0x02)
                 LogCallEnd(_logger, expired.State.IsGroupCall ? "GroupCall" : "PrivateCall", expired.SourceId, expired.State.DstId);
             else
                 LogCallTimeout(_logger, expired.SourceId, expired.State.DstId);
-            OnSignalingReceived?.Invoke(expired.SourceId, expired.State.DstId, expired.State.IsGroupCall, expired.EventType, duration);
+            var callEvent = new DmrCallEvent(
+                expired.SourceId,
+                expired.State.DstId,
+                expired.State.HotspotId,
+                expired.State.IsGroupCall,
+                expired.EventType == 0x02 ? DmrCallEventType.Ended : DmrCallEventType.TimedOut,
+                expired.EventType == 0x02 ? endedAtTicks : currentTicks,
+                durationTicks);
+            OnCallEvent?.Invoke(in callEvent);
             _expiredCalls[i] = default;
         }
     }
