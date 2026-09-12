@@ -3,46 +3,36 @@
 :sectnums:
 
 == Übersicht
-Der `MqttIntegrationService` ist ein Background-Worker, der den Zustand des Netzwerks (Topologie) und Echtzeit-Ereignisse (Anrufe, SMS) asynchron und allokationsfrei über einen MQTT-Broker publiziert.
+Der `MqttIntegrationService` ist ein Background-Worker, der Netzwerkzustand und Echtzeit-Ereignisse asynchron über einen MQTT-Broker publiziert. MQTT liegt außerhalb der harten Hot-Path-Garantie, verwendet aber begrenzte und wiederverwendete Puffer.
 
 == Architektur & Performance
-Die Anbindung an den `MicroSubnetRouter` und das `SdsGateway` erfolgt über entkoppelte In-Memory-Kanäle (`System.Threading.Channels`). Dies stellt sicher, dass Netzwerklatenzen beim MQTT-Publishing den zeitkritischen UDP-Receive-Loop für Sprachdaten niemals blockieren. Die JSON-Serialisierung erfolgt über einen `JsonSpanBuilder` mit exakt 0 Bytes Heap-Allokation im Hot-Path.
+Die Anbindung an den `MicroSubnetRouter` und das `SdsGateway` erfolgt über einen begrenzten In-Memory-Kanal (`System.Threading.Channels`). Dadurch blockiert MQTT-Netzwerklatenz den UDP-Empfang nicht. Die JSON-Serialisierung schreibt in wiederverwendete Puffer; fertige SMS-Strings und Verbindungswechsel dürfen weiterhin allokieren.
 
-== MQTT Topic-Baum (Struktur & Status)
+Der `RawMqttClient` besitzt einen festen Paketpuffer. TCP-Sends werden bis zur vollständigen Übertragung wiederholt und die CONNACK-Antwort wird auch bei fragmentiertem Empfang vollständig eingelesen. Nach einem Verbindungsfehler wird für den nächsten Versuch ein neuer Socket angelegt.
+
+== MQTT Topic-Baum
 Der Basis-Pfad lautet `dmroute/{zoneId}/`.
 
-=== 1. System & Infrastruktur (Retained, Polled)
-Zustandsdaten, die periodisch (z.B. alle 10 Sekunden) als Persistenz-Nachricht auf dem Broker aktualisiert werden.
+=== Calls
 
-* `sys/info`: Allgemeine Metriken (z. B. Anzahl aktiver Hotspots).
--> *Status: Implementiert*
-* `routing/hotspots`: Liste aller Repeater inkl. RPTC-Metadaten (Callsign, Software, TX-Power, Inaktivität).
--> *Status: Bugfix ausstehend (Offset-Korrektur für Fixed-Length Structs)*
-* `routing/mesh/peers`: Liste der über WireGuard/UDP verbundenen Zonen-Master.
--> *Status: Implementiert*
-* `routing/roaming/guests`: Fremde IDs im eigenen Netz.
--> *Status: Ausstehend*
-* `routing/roaming/away`: Eigene IDs in fremden Netzen.
--> *Status: Ausstehend*
+* `calls/active/{dstId}/{srcId}`: retained JSON bei Rufstart. Beim Rufende wird das retained Topic mit leerem Payload gelöscht.
+* `calls/history/{dstId}/{srcId}`: nicht-retained JSON bei sauberem Ende oder Timeout, einschließlich Rufdauer und Zeitstempel.
 
-=== 2. Echtzeit-Kommunikation (Event-Driven)
-Gefeuert durch Signalisierungs-Header (DMRD).
+Das Feld `type` unterscheidet `GroupCall` und `PrivateCall`.
 
-* `call/group/{dstId}/active`: Start eines Gruppenrufs.
--> *Status: Implementiert. (To-Do: Timeout/Status-Tracking hinzufügen, um unsauber beendete Calls korrekt als "beendet" zu markieren).*
-* `call/group/{dstId}/event`: Ende eines Gruppenrufs inkl. Historie.
--> *Status: Implementiert*
-* `call/private/{dstId}/active`: Start eines Privatrufs.
--> *Status: Implementiert*
-* `call/private/{dstId}/event`: Ende eines Privatrufs.
--> *Status: Implementiert*
+=== Roaming
 
-=== 3. Daten-Dienste & Diagnose (Event-Driven)
-Gefeuert durch den SDS-Decoder oder den Fallback-Zweig des Routers.
+* `roaming/guests/{deviceId}`: retained Status für eine fremde Teilnehmer-ID, die an einem lokalen Hotspot gesehen wurde.
+* `roaming/away/{deviceId}`: retained Status einer lokalen Teilnehmer-ID, deren Aufenthaltszone über das Mesh gemeldet wurde.
 
-* `sds/sms`: Dekodierte Textnachrichten (enthält `srcId`, `dstId` und `message`).
--> *Status: Bugfix ausstehend (Dynamisches UTF-16LE / UTF-8 Encoding).*
-* `sds/aprs`: Extrahierte APRS-Positionsdaten aus CSBK-Frames (ID 990099).
--> *Status: Parsing ausstehend.*
-* `diag/unknown_frame`: Hex-Dump nicht verarbeiteter DMR-Protokolldaten für Reverse Engineering.
--> *Status: Implementiert*
+Beim Ablauf eines Eintrags wird das jeweilige retained Topic mit leerem Payload gelöscht.
+
+=== SMS
+
+* `sms/{dstId}/{srcId}`: retained JSON mit dekodiertem Text und Zeitstempel.
+
+SMS ist wegen unterschiedlicher SDS-Varianten der Funkgeräte und Hotspots weiterhin best-effort implementiert. Der Hardware-Test bewertet Transport, Reassembly und Dekodierung deshalb einzeln.
+
+== Hardware-Prüfung
+
+Das Runbook unter `docs/hardware-test-plan.adoc` beschreibt die MQTT-Nachweise gemeinsam mit Server-Log und UDP-Paketmitschnitt.

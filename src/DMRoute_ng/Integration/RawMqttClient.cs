@@ -1,95 +1,135 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Net.Sockets;
 
 namespace DMRoute_ng.Integration;
 
-public sealed class RawMqttClient(byte[] clientId) : IDisposable
+public sealed class RawMqttClient : IDisposable
 {
-    private readonly Socket _socket = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+    private const int DefaultMaxPacketSize = 64 * 1024;
+    private readonly byte[] _clientId;
+    private readonly byte[] _buffer;
+    private readonly object _sync = new();
+    private Socket? _socket;
+
+    public RawMqttClient(byte[] clientId, int maxPacketSize = DefaultMaxPacketSize)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPacketSize, 128);
+        _clientId = clientId;
+        _buffer = GC.AllocateUninitializedArray<byte>(maxPacketSize, pinned: true);
+    }
 
     public async Task<bool> ConnectAsync(string host, int port)
     {
-        await _socket.ConnectAsync(host, port);
+        Socket socket;
+        lock (_sync)
+        {
+            _socket?.Dispose();
+            socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            _socket = socket;
+        }
 
-        var buffer = ArrayPool<byte>.Shared.Rent(128);
         try
         {
-            Span<byte> span = buffer;
-            ReadOnlySpan<byte> protoName = "MQTT"u8;
-
-            span[0] = 0x10; // CONNECT
-
-            var varHeaderLen = 2 + protoName.Length + 1 + 1 + 2;
-            var payloadLen = 2 + clientId.Length;
-            var remainingLength = varHeaderLen + payloadLen;
-
-            var lenBytesCount = WriteVariableLength(span.Slice(1), remainingLength);
-            var currentIdx = 1 + lenBytesCount;
-
-            BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIdx, 2), (ushort)protoName.Length);
-            currentIdx += 2;
-
-            protoName.CopyTo(span.Slice(currentIdx, protoName.Length));
-            currentIdx += protoName.Length;
-
-            span[currentIdx++] = 0x04; // Level (3.1.1)
-            span[currentIdx++] = 0x02; // Flags (Clean Session)
-            
-            BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIdx, 2), 60); // KeepAlive
-            currentIdx += 2;
-
-            BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIdx, 2), (ushort)clientId.Length);
-            currentIdx += 2;
-
-            clientId.CopyTo(span.Slice(currentIdx, clientId.Length));
-            currentIdx += clientId.Length;
-
-            await _socket.SendAsync(buffer.AsMemory(0, currentIdx), SocketFlags.None);
-
-            var received = await _socket.ReceiveAsync(buffer.AsMemory(0, 4), SocketFlags.None, CancellationToken.None);
-            
-            return received >= 4 && buffer[0] == 0x20 && buffer[1] == 0x02 && buffer[3] == 0x00;
+            await socket.ConnectAsync(host, port).ConfigureAwait(false);
+            var packetLength = WriteConnectPacket(_buffer);
+            await SendAllAsync(socket, _buffer.AsMemory(0, packetLength)).ConfigureAwait(false);
+            await ReceiveExactAsync(socket, _buffer.AsMemory(0, 4)).ConfigureAwait(false);
+            return _buffer[0] == 0x20 && _buffer[1] == 0x02 && _buffer[2] == 0x00 && _buffer[3] == 0x00;
         }
-        finally
+        catch
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            lock (_sync)
+            {
+                if (ReferenceEquals(_socket, socket)) _socket = null;
+            }
+            socket.Dispose();
+            throw;
         }
     }
 
     public void Publish(ReadOnlySpan<byte> topic, ReadOnlySpan<byte> payload, bool retain = false)
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(topic.Length + payload.Length + 16);
-        try
+        if (topic.IsEmpty || topic.Length > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(topic));
+        var innerLength = checked(2 + topic.Length + payload.Length);
+        var required = checked(1 + VariableLengthByteCount(innerLength) + innerLength);
+        if (required > _buffer.Length) throw new ArgumentException("MQTT packet exceeds the configured buffer size.");
+
+        lock (_sync)
         {
-            Span<byte> span = buffer;
-            
-            var innerLength = 2 + topic.Length + payload.Length;
-            
-            Span<byte> tempLenBuf = stackalloc byte[4];
-            var lenBytesCount = WriteVariableLength(tempLenBuf, innerLength);
+            var socket = _socket ?? throw new InvalidOperationException("MQTT client is not connected.");
+            var span = _buffer.AsSpan(0, required);
+            var currentIndex = 0;
+            span[currentIndex++] = (byte)(retain ? 0x31 : 0x30);
+            currentIndex += WriteVariableLength(span[currentIndex..], innerLength);
+            BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIndex, 2), (ushort)topic.Length);
+            currentIndex += 2;
+            topic.CopyTo(span[currentIndex..]);
+            currentIndex += topic.Length;
+            payload.CopyTo(span[currentIndex..]);
+            currentIndex += payload.Length;
 
-            var currentIdx = 0;
-            span[currentIdx++] = (byte)(retain ? 0x31 : 0x30); // PUBLISH (QoS 0)
-            
-            tempLenBuf.Slice(0, lenBytesCount).CopyTo(span.Slice(currentIdx, lenBytesCount));
-            currentIdx += lenBytesCount;
-
-            BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIdx, 2), (ushort)topic.Length);
-            currentIdx += 2;
-
-            topic.CopyTo(span.Slice(currentIdx, topic.Length));
-            currentIdx += topic.Length;
-
-            payload.CopyTo(span.Slice(currentIdx, payload.Length));
-            currentIdx += payload.Length;
-
-            _socket.Send(span.Slice(0, currentIdx));
+            var sent = 0;
+            while (sent < currentIndex)
+            {
+                var count = socket.Send(span[sent..currentIndex], SocketFlags.None);
+                if (count == 0) throw new SocketException((int)SocketError.ConnectionReset);
+                sent += count;
+            }
         }
-        finally
+    }
+
+    private int WriteConnectPacket(Span<byte> span)
+    {
+        ReadOnlySpan<byte> protocolName = "MQTT"u8;
+        var remainingLength = 2 + protocolName.Length + 1 + 1 + 2 + 2 + _clientId.Length;
+        var required = 1 + VariableLengthByteCount(remainingLength) + remainingLength;
+        if (_clientId.Length > ushort.MaxValue || required > span.Length)
+            throw new ArgumentException("MQTT client ID exceeds the configured buffer size.");
+
+        var currentIndex = 0;
+        span[currentIndex++] = 0x10;
+        currentIndex += WriteVariableLength(span[currentIndex..], remainingLength);
+        BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIndex, 2), (ushort)protocolName.Length);
+        currentIndex += 2;
+        protocolName.CopyTo(span[currentIndex..]);
+        currentIndex += protocolName.Length;
+        span[currentIndex++] = 0x04;
+        span[currentIndex++] = 0x02;
+        BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIndex, 2), 60);
+        currentIndex += 2;
+        BinaryPrimitives.WriteUInt16BigEndian(span.Slice(currentIndex, 2), (ushort)_clientId.Length);
+        currentIndex += 2;
+        _clientId.CopyTo(span[currentIndex..]);
+        return currentIndex + _clientId.Length;
+    }
+
+    private static async Task SendAllAsync(Socket socket, ReadOnlyMemory<byte> packet)
+    {
+        var sent = 0;
+        while (sent < packet.Length)
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            var count = await socket.SendAsync(packet[sent..], SocketFlags.None).ConfigureAwait(false);
+            if (count == 0) throw new SocketException((int)SocketError.ConnectionReset);
+            sent += count;
         }
+    }
+
+    private static async Task ReceiveExactAsync(Socket socket, Memory<byte> target)
+    {
+        var received = 0;
+        while (received < target.Length)
+        {
+            var count = await socket.ReceiveAsync(target[received..], SocketFlags.None).ConfigureAwait(false);
+            if (count == 0) throw new SocketException((int)SocketError.ConnectionReset);
+            received += count;
+        }
+    }
+
+    private static int VariableLengthByteCount(int length)
+    {
+        var count = 1;
+        while ((length /= 128) > 0) count++;
+        return count;
     }
 
     private static int WriteVariableLength(Span<byte> target, int length)
@@ -107,6 +147,10 @@ public sealed class RawMqttClient(byte[] clientId) : IDisposable
 
     public void Dispose()
     {
-        _socket.Dispose();
+        lock (_sync)
+        {
+            _socket?.Dispose();
+            _socket = null;
+        }
     }
 }

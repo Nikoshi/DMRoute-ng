@@ -5,16 +5,27 @@ public static class DmrFecDecoder
     public static byte[] Decode(ReadOnlySpan<byte> payload, byte colorCode)
     {
         if (payload.Length < 33) return Array.Empty<byte>();
+        var result = new byte[12];
+        TryDecode(payload, colorCode, result, out _);
+        return result;
+    }
 
-        // 1. Color Code De-Masking
-        Span<byte> unmasked = stackalloc byte[payload.Length];
-        RemoveColorCodeMask(payload, unmasked, colorCode);
+    public static bool TryDecode(ReadOnlySpan<byte> payload, byte colorCode, Span<byte> destination, out int written)
+    {
+        if (payload.Length < 33 || destination.Length < 12)
+        {
+            written = 0;
+            return false;
+        }
 
-        // 3. FEC Decoding (beinhaltet De-Interleaving und Hamming)
+        Span<byte> unmasked = stackalloc byte[33];
+        RemoveColorCodeMask(payload[..33], unmasked, colorCode);
+
         Span<byte> decoded = stackalloc byte[12];
         Bptc19696.Decode(unmasked, decoded);
-
-        return [.. decoded];
+        decoded.CopyTo(destination);
+        written = decoded.Length;
+        return true;
     }
 
     private static void RemoveColorCodeMask(ReadOnlySpan<byte> input, Span<byte> output, byte cc)

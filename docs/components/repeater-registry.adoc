@@ -11,3 +11,6 @@ Verwaltung des Repeater-Zustands, der Homebrew-Authentifizierungsdaten (Challeng
 == Thread-Sicherheit
 * Nutzung eines `ConcurrentDictionary<int, Repeater>` für atomare Operationen.
 * Mutierende Eigenschaften am `Repeater`-Objekt müssen bei parallelen Netzwerk-Events im DmrServer-Loop berücksichtigt werden.
+* Der Paket-Router enumeriert nicht direkt das `ConcurrentDictionary`. Er liest einen Array-Snapshot, der bei Anmeldung oder Topologieänderungen außerhalb des stetigen Paketpfads erneuert wird.
+* Netzwerkendpunkte werden als `Ipv4Endpoint`-Werte gespeichert; dadurch sind Vergleich und Übergabe im Routing frei von Endpoint-Allokationen.
+* Nur ein gültiges `RPTL` darf einen dynamischen Repeater-Eintrag anlegen. DMRD-, Ping-, Key- und Config-Pfade verwenden ein reines Lookup, damit unbekannte IDs keine Objekte oder PSK-Strings erzeugen.

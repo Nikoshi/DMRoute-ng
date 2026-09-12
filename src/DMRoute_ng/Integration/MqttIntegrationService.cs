@@ -100,7 +100,7 @@ public sealed class MqttIntegrationService : BackgroundService
 
     private async Task EventLoop(CancellationToken token)
     {
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(32768);
         byte[] topicBuffer = ArrayPool<byte>.Shared.Rent(256);
 
         try

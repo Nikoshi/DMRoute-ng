@@ -1,0 +1,66 @@
+= Hot-Path- und Speicherarchitektur
+:toc:
+:sectnums:
+
+== Ziel
+
+Der UDP-Empfang, die DMR-Paketklassifizierung, Voice-/Data-Routing, Ping-Antworten und die Aufnahme von SDS-Blöcken müssen nach Start und Warm-up innerhalb der konfigurierten Kapazitäten ohne verwaltete Heap-Allokationen arbeiten.
+
+Die Fertigstellung einer SMS, MQTT-Verbindungsaufbau, Topologieänderungen und periodische Diagnose gehören nicht zu dieser harten Garantie. Auch dort werden unnötige Kopien vermieden.
+
+== Lebensdauer und Besitz
+
+Der `DmrServer` besitzt einen gepinnten Empfangspuffer und verarbeitet jedes Datagramm vollständig, bevor der Puffer wieder beschrieben wird. Paketdaten werden als `ReadOnlySpan<byte>` synchron an Router und Gateway weitergereicht.
+
+Vor dem synchronen Empfang wartet der Worker höchstens 250 ms in `Socket.Poll`. Dadurch kann der Host auch auf Plattformen sauber stoppen, auf denen das Schließen eines Sockets einen bereits blockierenden `recvmsg` nicht zuverlässig aufweckt.
+
+Ein Empfänger darf einen Paket-Span nicht speichern oder über ein `await` hinaus verwenden. Komponenten, die Daten über mehrere Pakete halten, schreiben diese explizit in eigenen, vorab reservierten Speicher.
+
+Kleine Protokollantworten und Decoder-Arbeitsbereiche verwenden `stackalloc`. Variable oder große Daten dürfen nicht dynamisch auf dem Stack reserviert werden.
+
+== Netzwerkpfad
+
+[source,text]
+----
+Socket.ReceiveFrom
+  -> wiederverwendeter SocketAddress
+  -> Ipv4Endpoint (Value-Type)
+  -> ReadOnlySpan<byte>
+  -> DmrServer -> MicroSubnetRouter -> IDmrSender
+  -> wiederverwendeter SocketAddress -> Socket.SendTo
+----
+
+`Ipv4Endpoint` hält IPv4-Adresse und Port als Werte. Dadurch entstehen beim Vergleich und Weiterreichen von Absendern keine `IPEndPoint`-Objekte. Empfangs- und Sende-`SocketAddress` werden nicht pro Datagramm neu erzeugt.
+
+== Begrenzter Zustand
+
+Die Routingtabellen werden beim Start auf feste Maximalgrößen vorbereitet:
+
+[cols="2,1,3",options="header"]
+|===
+|Konfiguration |Standard |Verwendung
+
+|`Routing:MaxActiveCalls`
+|256
+|Aktive und auslaufende Calls
+
+|`Routing:MaxLocalDeviceRoutes`
+|8192
+|Gelernte lokale Teilnehmer und lokale Gäste
+
+|`Sds:MaxSessions`
+|128
+|Gleichzeitige SDS-Reassemblies
+
+|`Sds:MaxMessageBytes`
+|4096
+|Maximale Bytes pro SDS-Nachricht
+|===
+
+Ist eine Tabelle voll, wird das DMR-Paket weiterhin geroutet. Nur der neue Tracking-Zustand wird nicht angelegt; ein atomarer Diagnosezähler wird erhöht.
+
+== Verifikation
+
+Allokationstests wärmen den jeweiligen Pfad vor und vergleichen anschließend `GC.GetAllocatedBytesForCurrentThread()` vor und nach einer größeren Zahl identischer Operationen. Der erwartete Unterschied beträgt 0 Bytes.
+
+Build und Tests werden über `make test` in Release-Konfiguration ausgeführt.

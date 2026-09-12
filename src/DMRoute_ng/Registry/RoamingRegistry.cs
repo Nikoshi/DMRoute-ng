@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Threading.Channels;
 using DMRoute_ng.Integration;
+using DMRoute_ng.Types;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -14,19 +14,26 @@ public sealed class ForeignDeviceEntry(int deviceId, int currentZoneId)
     public long LastSeenTicks = DateTime.UtcNow.Ticks;
 }
 
-public sealed class LocalGuestDeviceEntry(int deviceId, IPEndPoint hotspotEndPoint)
-{
-    public int DeviceId { get; } = deviceId;
-    public IPEndPoint HotspotEndPoint { get; set; } = hotspotEndPoint;
-    public long LastSeenTicks = DateTime.UtcNow.Ticks;
-}
-
 public sealed class RoamingRegistry(
     ILogger<RoamingRegistry> logger,
-    ChannelWriter<MqttEvent> eventWriter) : BackgroundService
+    ChannelWriter<MqttEvent> eventWriter,
+    int maxLocalGuests = 8192) : BackgroundService
 {
+    private struct LocalGuestState
+    {
+        public int DeviceId;
+        public Ipv4Endpoint HotspotEndPoint;
+        public long LastSeenTicks;
+        public bool Active;
+    }
+
     private readonly ConcurrentDictionary<int, ForeignDeviceEntry> _roamingHomeDevices = new();
-    private readonly ConcurrentDictionary<int, LocalGuestDeviceEntry> _localGuestDevices = new();
+    private readonly Dictionary<int, int> _localGuestSlots = new(maxLocalGuests);
+    private readonly LocalGuestState[] _localGuests = new LocalGuestState[maxLocalGuests];
+    private readonly object _localGuestLock = new();
+    private long _droppedLocalGuestStates;
+
+    public long DroppedLocalGuestStates => Interlocked.Read(ref _droppedLocalGuestStates);
 
     public void UpdateDeviceLocation(int deviceId, int foreignZoneId)
     {
@@ -66,22 +73,40 @@ public sealed class RoamingRegistry(
         return false;
     }
 
-    public void TrackLocalGuest(int deviceId, IPEndPoint hotspotEndPoint)
+    public void TrackLocalGuest(int deviceId, Ipv4Endpoint hotspotEndPoint)
     {
-        bool isNew = false;
-        _localGuestDevices.AddOrUpdate(
-            deviceId,
-            id => 
+        var isNew = false;
+        lock (_localGuestLock)
+        {
+            if (_localGuestSlots.TryGetValue(deviceId, out var existingSlot))
             {
+                ref var existing = ref _localGuests[existingSlot];
+                existing.HotspotEndPoint = hotspotEndPoint;
+                existing.LastSeenTicks = DateTime.UtcNow.Ticks;
+                return;
+            }
+
+            if (_localGuestSlots.Count >= _localGuests.Length)
+            {
+                Interlocked.Increment(ref _droppedLocalGuestStates);
+                return;
+            }
+
+            for (var slot = 0; slot < _localGuests.Length; slot++)
+            {
+                if (_localGuests[slot].Active) continue;
+                _localGuests[slot] = new LocalGuestState
+                {
+                    DeviceId = deviceId,
+                    HotspotEndPoint = hotspotEndPoint,
+                    LastSeenTicks = DateTime.UtcNow.Ticks,
+                    Active = true
+                };
+                _localGuestSlots.Add(deviceId, slot);
                 isNew = true;
-                return new LocalGuestDeviceEntry(id, hotspotEndPoint);
-            },
-            (id, entry) =>
-            {
-                entry.HotspotEndPoint = hotspotEndPoint;
-                Volatile.Write(ref entry.LastSeenTicks, DateTime.UtcNow.Ticks);
-                return entry;
-            });
+                break;
+            }
+        }
 
         if (isNew)
         {
@@ -89,15 +114,18 @@ public sealed class RoamingRegistry(
         }
     }
 
-    public bool TryGetLocalGuestEndpoint(int deviceId, out IPEndPoint? hotspotEndPoint)
+    public bool TryGetLocalGuestEndpoint(int deviceId, out Ipv4Endpoint hotspotEndPoint)
     {
-        if (_localGuestDevices.TryGetValue(deviceId, out var entry))
+        lock (_localGuestLock)
         {
-            hotspotEndPoint = entry.HotspotEndPoint;
-            return true;
+            if (_localGuestSlots.TryGetValue(deviceId, out var slot))
+            {
+                hotspotEndPoint = _localGuests[slot].HotspotEndPoint;
+                return true;
+            }
         }
 
-        hotspotEndPoint = null;
+        hotspotEndPoint = default;
         return false;
     }
 
@@ -121,14 +149,15 @@ public sealed class RoamingRegistry(
                 }
             }
 
-            foreach (var kvp in _localGuestDevices)
+            lock (_localGuestLock)
             {
-                if (Volatile.Read(ref kvp.Value.LastSeenTicks) < cutoffTicks)
+                for (var slot = 0; slot < _localGuests.Length; slot++)
                 {
-                    if (_localGuestDevices.TryRemove(kvp.Key, out _))
-                    {
-                        eventWriter.TryWrite(new MqttEvent(0x11, kvp.Key));
-                    }
+                    ref var guest = ref _localGuests[slot];
+                    if (!guest.Active || guest.LastSeenTicks >= cutoffTicks) continue;
+                    _localGuestSlots.Remove(guest.DeviceId);
+                    eventWriter.TryWrite(new MqttEvent(0x11, guest.DeviceId));
+                    guest = default;
                 }
             }
         }

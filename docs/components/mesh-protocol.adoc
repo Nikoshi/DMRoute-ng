@@ -14,3 +14,7 @@ Das Protokoll verwendet zwei proprietäre Pakettypen:
 == Sicherheit & Validierung
 * **Signatur:** Die Integrität aller Pakete wird durch einen 32 Byte großen HMAC-SHA256 sichergestellt[cite: 9]. Dieser wird mit einem globalen Mesh-PSK über den jeweiligen Header gebildet[cite: 9].
 * **Replay-Schutz:** Jedes Paket enthält einen UTC-Zeitstempel (Ticks)[cite: 9]. Empfangene Pakete, deren Zeitstempel mehr als 30 Sekunden von der lokalen Systemzeit abweichen, werden als mögliche Replay-Attacke verworfen[cite: 9].
+
+== Übergabe aus dem DMR-Routing
+
+Erkennt der Router einen fremden Teilnehmer, schreibt er ein wertbasiertes Location-Update in eine begrenzte Queue. Ein eigener Mesh-Worker serialisiert und versendet die ROAM-Nachricht mit wiederverwendeten Paket- und Adresspuffern. Der DMR-Paketthread erzeugt dabei weder Task-, Paket- noch Endpoint-Objekte.

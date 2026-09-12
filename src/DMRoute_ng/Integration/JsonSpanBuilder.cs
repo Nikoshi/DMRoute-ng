@@ -75,10 +75,51 @@ public ref struct JsonSpanBuilder
         WriteByte((byte)'"');
         if (!string.IsNullOrEmpty(value))
         {
-            int written = System.Text.Encoding.UTF8.GetBytes(value, _buffer.Slice(_offset));
-            _offset += written;
+            AppendEscapedString(value);
         }
         WriteByte((byte)'"');
+    }
+
+    private void AppendEscapedString(ReadOnlySpan<char> value)
+    {
+        var segmentStart = 0;
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (c is not ('"' or '\\' or '\b' or '\f' or '\n' or '\r' or '\t') && c >= 0x20) continue;
+
+            if (i > segmentStart)
+                _offset += System.Text.Encoding.UTF8.GetBytes(value[segmentStart..i], _buffer[_offset..]);
+
+            WriteByte((byte)'\\');
+            switch (c)
+            {
+                case '"': WriteByte((byte)'"'); break;
+                case '\\': WriteByte((byte)'\\'); break;
+                case '\b': WriteByte((byte)'b'); break;
+                case '\f': WriteByte((byte)'f'); break;
+                case '\n': WriteByte((byte)'n'); break;
+                case '\r': WriteByte((byte)'r'); break;
+                case '\t': WriteByte((byte)'t'); break;
+                default:
+                    WriteByte((byte)'u');
+                    WriteByte((byte)'0');
+                    WriteByte((byte)'0');
+                    WriteHexNibble(c >> 4);
+                    WriteHexNibble(c);
+                    break;
+            }
+            segmentStart = i + 1;
+        }
+
+        if (segmentStart < value.Length)
+            _offset += System.Text.Encoding.UTF8.GetBytes(value[segmentStart..], _buffer[_offset..]);
+    }
+
+    private void WriteHexNibble(int value)
+    {
+        value &= 0x0F;
+        WriteByte((byte)(value < 10 ? '0' + value : 'A' + value - 10));
     }
     
     // Optional, aber nützlich für bools

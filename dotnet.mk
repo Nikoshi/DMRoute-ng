@@ -3,9 +3,10 @@
 MAKEFLAGS += --silent
 
 PROJECT_NAME ?=$(shell basename `pwd`) # TODO: Fix
-PROJECT_CONFIG ?= Debug
-NET_VERSION ?= net8.0
-BINARY = bin/$(PROJECT_CONFIG)/$(NET_VERSION)/$(PROJECT_NAME).dll
+PROJECT_CONFIG ?= Release
+NET_VERSION ?= net9.0
+PROJECT_PATH ?= src/DMRoute_ng/DMRoute-ng.csproj
+BINARY = src/DMRoute_ng/bin/$(PROJECT_CONFIG)/$(NET_VERSION)/$(PROJECT_NAME).dll
 CS_FILES = $(shell find . -type f -name '*.cs')
 
 EDITOR ?= rider
@@ -37,10 +38,10 @@ help:
 	@echo "Default Action is to compile the project"
 
 run: $(BINARY)
-	dotnet run -c $(PROJECT_CONFIG)
+	dotnet run --project $(PROJECT_PATH) -c $(PROJECT_CONFIG) --no-build
 
 test: $(BINARY)
-	dotnet test
+	dotnet test -c $(PROJECT_CONFIG) --no-build
 
 add:
 	test $(PKG)

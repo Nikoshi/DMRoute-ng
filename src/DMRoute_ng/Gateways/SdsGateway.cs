@@ -1,148 +1,210 @@
-using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Text;
 using DMRoute_ng.Coding;
-using Microsoft.Extensions.Logging;
 using DMRoute_ng.Routing;
 using DMRoute_ng.Types;
+using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Gateways;
 
-public class SdsGateway
+public sealed class SdsGateway
 {
-    private readonly ILogger<SdsGateway> _logger;
-    private const byte FallbackColorCode = 1;
-
-    // Neues Flag 'bool IsConfirmedData' hinzugefügt
-    private readonly ConcurrentDictionary<int, (int ExpectedBlocks, int DstId, bool IsConfirmedData, List<byte> Buffer)>
-        _messageBuffers = new();
-
-    // Event um Ziel-ID erweitert
-    public event Action<int, int, string>? OnSmsReceived;
-
-    public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router)
+    private struct SessionState
     {
+        public int SourceId;
+        public int DestinationId;
+        public int Length;
+        public long LastSeenTicks;
+        public bool IsConfirmedData;
+        public bool Active;
+    }
+
+    private readonly ILogger<SdsGateway> _logger;
+    private readonly int _maxMessageBytes;
+    private readonly Dictionary<int, int> _sessionSlots;
+    private readonly SessionState[] _sessions;
+    private readonly byte[] _messageStorage;
+    private long _nextCleanupTicks;
+    private long _droppedSessions;
+    private long _oversizedMessages;
+
+    public event Action<int, int, string>? OnSmsReceived;
+    public long DroppedSessions => Interlocked.Read(ref _droppedSessions);
+    public long OversizedMessages => Interlocked.Read(ref _oversizedMessages);
+
+    public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router, int maxSessions = 128, int maxMessageBytes = 4096)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSessions);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxMessageBytes, 64);
         _logger = logger;
+        _maxMessageBytes = maxMessageBytes;
+        _sessionSlots = new Dictionary<int, int>(maxSessions);
+        _sessions = new SessionState[maxSessions];
+        _messageStorage = GC.AllocateUninitializedArray<byte>(checked(maxSessions * maxMessageBytes));
+        _nextCleanupTicks = DateTime.UtcNow.AddSeconds(30).Ticks;
         router.OnDataFrameReceived += HandleDataFrame;
     }
 
-    private void HandleDataFrame(byte[] packet, string sourceEndpoint)
+    internal void HandleDataFrame(ReadOnlySpan<byte> packet)
     {
         if (packet.Length < 53) return;
+        var now = DateTime.UtcNow.Ticks;
+        if (now >= _nextCleanupTicks) CleanupExpired(now);
 
-        var srcId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
-        var dstId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
+        var sourceId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
+        var destinationId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
         var dataType = (byte)(packet[15] & 0x0F);
-
         if (dataType is < 0x06 or > 0x08) return;
 
-        var payload = packet.AsSpan(20, 33);
-
-        if (dataType == 0x06) // Text Header
+        if (dataType == 0x06)
         {
-            _messageBuffers[srcId] =
-                (ExpectedBlocks: 0, DstId: dstId, IsConfirmedData: false, Buffer: new List<byte>());
+            if (TryGetOrCreateSession(sourceId, destinationId, false, now, out var headerSlot))
+            {
+                ref var headerSession = ref _sessions[headerSlot];
+                headerSession.Length = 0;
+                headerSession.IsConfirmedData = false;
+                headerSession.LastSeenTicks = now;
+            }
+            return;
         }
-        else if (dataType is 0x07 or 0x08) // Data Blöcke
+
+        var payload = packet.Slice(20, 33);
+        var blockSize = dataType == 0x07 ? 12 : 18;
+        Span<byte> decodedData = stackalloc byte[18];
+        var decodedBlock = decodedData[..blockSize];
+        if (dataType == 0x07) Bptc19696.Decode(payload, decodedBlock);
+        else if (!DmrTrellis.Decode(payload, decodedBlock)) return;
+
+        if (!_sessionSlots.TryGetValue(sourceId, out var slot))
         {
-            var blockSize = dataType == 0x07 ? 12 : 18;
-            Span<byte> decodedData = stackalloc byte[blockSize];
+            var ipIndex = decodedBlock.IndexOf((byte)0x45);
+            if (ipIndex < 0 || !TryGetOrCreateSession(sourceId, destinationId, ipIndex == 2, now, out slot)) return;
+        }
 
-            if (dataType == 0x07) Bptc19696.Decode(payload, decodedData);
-            else if (!DmrTrellis.Decode(payload, decodedData)) return;
+        ref var session = ref _sessions[slot];
+        if (session.Length == 0 && decodedBlock.Length > 2 && decodedBlock[2] == 0x45) session.IsConfirmedData = true;
 
-            if (!_messageBuffers.TryGetValue(srcId, out var session))
+        var startIndex = session.IsConfirmedData ? 2 : 0;
+        var bytesToAppend = decodedBlock[startIndex..];
+        if (session.Length + bytesToAppend.Length > _maxMessageBytes)
+        {
+            Interlocked.Increment(ref _oversizedMessages);
+            ReleaseSession(slot);
+            return;
+        }
+
+        var message = GetSessionBuffer(slot);
+        bytesToAppend.CopyTo(message[session.Length..]);
+        session.Length += bytesToAppend.Length;
+        session.LastSeenTicks = now;
+
+        if (TryDecodeMessage(message[..session.Length], out var encoding, out var textBytes))
+        {
+            var targetId = session.DestinationId;
+            ReleaseSession(slot);
+            PublishSms(sourceId, targetId, encoding, textBytes);
+        }
+    }
+
+    private bool TryGetOrCreateSession(int sourceId, int destinationId, bool isConfirmedData, long now, out int slot)
+    {
+        if (_sessionSlots.TryGetValue(sourceId, out slot)) return true;
+        if (_sessionSlots.Count >= _sessions.Length)
+        {
+            Interlocked.Increment(ref _droppedSessions);
+            slot = -1;
+            return false;
+        }
+
+        for (slot = 0; slot < _sessions.Length; slot++)
+        {
+            if (_sessions[slot].Active) continue;
+            _sessions[slot] = new SessionState
             {
-                int ipIdx = decodedData.IndexOf((byte)0x45);
-                if (ipIdx == -1) return; // Padding Block verwerfen
+                SourceId = sourceId,
+                DestinationId = destinationId,
+                IsConfirmedData = isConfirmedData,
+                LastSeenTicks = now,
+                Active = true
+            };
+            _sessionSlots.Add(sourceId, slot);
+            return true;
+        }
 
-                bool isConfirmed = ipIdx == 2;
-                session = (ExpectedBlocks: 0, DstId: dstId, IsConfirmedData: isConfirmed, Buffer: new List<byte>());
-                _messageBuffers[srcId] = session;
-            }
+        Interlocked.Increment(ref _droppedSessions);
+        slot = -1;
+        return false;
+    }
 
-            if (session.Buffer.Count == 0 && decodedData.Length > 2 && decodedData[2] == 0x45)
+    private Span<byte> GetSessionBuffer(int slot) => _messageStorage.AsSpan(slot * _maxMessageBytes, _maxMessageBytes);
+
+    private void ReleaseSession(int slot)
+    {
+        _sessionSlots.Remove(_sessions[slot].SourceId);
+        _sessions[slot] = default;
+    }
+
+    private void CleanupExpired(long now)
+    {
+        var cutoff = now - TimeSpan.FromSeconds(30).Ticks;
+        for (var slot = 0; slot < _sessions.Length; slot++)
+        {
+            if (_sessions[slot].Active && _sessions[slot].LastSeenTicks < cutoff) ReleaseSession(slot);
+        }
+        _nextCleanupTicks = now + TimeSpan.FromSeconds(30).Ticks;
+    }
+
+    private static bool TryDecodeMessage(ReadOnlySpan<byte> message, out byte encoding, out ReadOnlySpan<byte> textBytes)
+    {
+        var ipOffset = message.IndexOf((byte)0x45);
+        while (ipOffset >= 0)
+        {
+            var ipv4 = new Ipv4Packet(message[ipOffset..]);
+            if (ipv4.IsValid)
             {
-                session.IsConfirmedData = true;
-                _messageBuffers[srcId] = session;
-            }
-
-            var startIndex = session.IsConfirmedData ? 2 : 0;
-            for (int i = startIndex; i < decodedData.Length; i++)
-            {
-                session.Buffer.Add(decodedData[i]);
-            }
-
-            var fullMessage = session.Buffer.ToArray();
-            var spanMessage = fullMessage.AsSpan();
-
-            var ipOffset = spanMessage.IndexOf((byte)0x45);
-
-            while (ipOffset != -1)
-            {
-                var ipSpan = spanMessage.Slice(ipOffset);
-                var ipv4 = new Ipv4Packet(ipSpan);
-
-                if (ipv4.IsValid)
+                var udp = new UdpDatagram(ipv4.Payload);
+                if (udp.IsValid && (udp.SourcePort == 4007 || udp.DestinationPort == 4007))
                 {
-                    var udp = new UdpDatagram(ipv4.Payload);
-
-                    if (udp.IsValid && (udp.SourcePort == 4007 || udp.DestinationPort == 4007))
+                    var tms = new TmsMessage(udp.Payload);
+                    if (tms.IsValid)
                     {
-                        var tms = new TmsMessage(udp.Payload);
-
-                        if (tms.IsValid)
-                        {
-                            _messageBuffers.TryRemove(srcId, out _);
-
-                            var textLength = tms.TextBytes.Length;
-                            if (textLength > 0)
-                            {
-                                try
-                                {
-                                    string text;
-                                    if (tms.EncodingByte == 0x04)
-                                    {
-                                        if (textLength % 2 != 0) textLength--;
-                                        text = Encoding.Unicode.GetString(tms.TextBytes.Slice(0, textLength));
-                                    }
-                                    else
-                                    {
-                                        text = Encoding.UTF8.GetString(tms.TextBytes);
-                                    }
-
-                                    text = text.Trim('\0', '\r', '\n');
-
-                                    if (!string.IsNullOrWhiteSpace(text))
-                                    {
-                                        _logger.LogInformation("SMS von {SrcId} an {DstId} (Enc: 0x{Enc:X2}): {Text}",
-                                            srcId, session.DstId, tms.EncodingByte, text);
-                                        OnSmsReceived?.Invoke(srcId, session.DstId, text);
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, "Fehler beim Dekodieren der SMS (Enc: 0x{Enc:X2})",
-                                        tms.EncodingByte);
-                                }
-                            }
-                        }
-
-                        return;
+                        encoding = tms.EncodingByte;
+                        textBytes = tms.TextBytes;
+                        return true;
                     }
                 }
-
-                // Weitersuchen, falls 0x45 ein Fehlfund war
-                if (ipOffset + 1 < spanMessage.Length)
-                {
-                    var nextIdx = spanMessage.Slice(ipOffset + 1).IndexOf((byte)0x45);
-                    ipOffset = nextIdx == -1 ? -1 : ipOffset + 1 + nextIdx;
-                }
-                else
-                {
-                    ipOffset = -1;
-                }
             }
+
+            var next = message[(ipOffset + 1)..].IndexOf((byte)0x45);
+            ipOffset = next < 0 ? -1 : ipOffset + 1 + next;
+        }
+
+        encoding = 0;
+        textBytes = default;
+        return false;
+    }
+
+    private void PublishSms(int sourceId, int destinationId, byte encoding, ReadOnlySpan<byte> textBytes)
+    {
+        if (textBytes.IsEmpty) return;
+        try
+        {
+            string text;
+            if (encoding == 0x04)
+            {
+                if ((textBytes.Length & 1) != 0) textBytes = textBytes[..^1];
+                text = Encoding.Unicode.GetString(textBytes);
+            }
+            else text = Encoding.UTF8.GetString(textBytes);
+
+            text = text.Trim('\0', '\r', '\n');
+            if (string.IsNullOrWhiteSpace(text)) return;
+            _logger.LogInformation("SMS von {SourceId} an {DestinationId} (Enc: 0x{Encoding:X2}): {Text}",
+                sourceId, destinationId, encoding, text);
+            OnSmsReceived?.Invoke(sourceId, destinationId, text);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Fehler beim Dekodieren der SMS (Enc: 0x{Encoding:X2})", encoding);
         }
     }
 }

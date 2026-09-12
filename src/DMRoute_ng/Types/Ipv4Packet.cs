@@ -25,7 +25,7 @@ public ref struct Ipv4Packet
         HeaderLength = (data[0] & 0x0F) * 4;
         TotalLength = BinaryPrimitives.ReadUInt16BigEndian(data.Slice(2, 2));
 
-        if (TotalLength > data.Length || HeaderLength > TotalLength)
+        if (HeaderLength < 20 || TotalLength > data.Length || HeaderLength > TotalLength)
         {
             IsValid = false;
             Payload = default;
