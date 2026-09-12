@@ -1,5 +1,16 @@
 # DMRoute-ng handoff
 
+## Active work: location telemetry
+
+- Branch `feat/location` was created from merged `origin/main` (`3be538e`); the obsolete local `mqtt` branch was removed.
+- Real hardware evidence was captured before implementation:
+  - `/tmp/dmroute-aprs-real.pcap` contains the AnyTone fixed beacon at `34.2 N, 108.833333 E`.
+  - `/tmp/dmroute-aprs-gps.pcap` contains a live GPS beacon; its exact coordinates remain only in the private runtime artifact.
+  - A manually sent GPS information message decoded as UTF-16LE TMS text with coordinates, speed, and altitude.
+- Approved behavior: decode NMEA RMC and AnyTone GPS text, publish non-retained `sds/gps`, and apply a configurable 10 km MQTT grid by default. Recognized GPS SMS text must be redacted while privacy is enabled.
+- Implemented span-based decoders, a value-type location event, bounded MQTT queue integration, configurable privacy rastering, GPS-SMS redaction, tests, and detailed AsciiDoc documentation.
+- H08 passed live with both the automatic NMEA report and the manual AnyTone GPS-information SDS. The implementation is ready for review on `feat/location`.
+
 ## Objective
 
 Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up within configured capacities. The current work package replaces the provisional MQTT topics with the canonical `sys`, `routing`, `call`, `sds`, and `diag` tree while retaining the project's `RawMqttClient`.
@@ -36,11 +47,15 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 - Call events now carry the packet repeater ID and original UTC ticks. Terminators preserve their receipt tick, so `durationSec` excludes the cleanup delay and is emitted to three decimal places with `endReason=Terminated`; silence expiry uses the last frame and `endReason=Timeout`.
 - `RoamingRegistry` is independent of MQTT and exposes bounded span snapshots containing the actual hotspot ID and activity times. Repeater state records login time for MQTT uptime.
 - Added allocation-free UTF-8 endpoint formatting and span JSON support for fixed decimals, ISO-8601 UTC timestamps, and hexadecimal payloads. Rewrote the MQTT AsciiDoc contract and updated the active hardware runbook.
+- Added allocation-free NMEA RMC parsing for the AnyTone APRS data stream and direct UTF-16LE parsing for manually sent AnyTone GPS information. Both paths emit `DmrLocationEvent` with the actual packet hotspot ID and master receive timestamp.
+- Removed the provisional CSBK `0x03` APRS hook: the CSBK only announces the transfer, while the position data is reassembled from the following `0x06`/`0x07` frames.
+- Added non-retained `dmroute/{zoneId}/sds/gps` publishing through `RawMqttClient`. MQTT location privacy defaults to a deterministic 10 km grid; exact coordinates can be enabled explicitly. Recognized GPS SMS text is replaced with `[GPS position redacted]` while privacy is active, including malformed `Template:` messages.
+- Added `docs/components/location-telemetry.adoc` with the input formats, data flow, raster equations, configuration, payload, protection properties, and limits. The hardware runbook now includes the H08 location/privacy acceptance test.
 
 ## Validation
 
 - Release build succeeds with 0 warnings and 0 errors.
-- `make test` passes 31/31 tests in Release mode.
+- `make test` passes 48/48 tests in Release mode.
 - Warmed allocation tests report 0 bytes for group routing, known ping, unknown DMRD/ping, new state within reserved capacity, a full call table and SDS header ingestion.
 - UDP `SocketAddress` round-trip and real loopback send tests pass.
 - MQTT fragmented-CONNACK and publish-wire-format integration test passes.
@@ -49,6 +64,9 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 - Every AsciiDoc file under `docs/` and `docs/components/` renders successfully with `asciidoctor`.
 - Isolated DMR and Mesh start/stop tests complete within their two-second deadline.
 - A complete host smoke test binds both UDP services, handles an unavailable MQTT broker, and exits cleanly with code 0 after `Ctrl+C`.
+- Captured DMRD frames reassemble and decode 100/100 times with 0 managed bytes allocated after warm-up. Enqueue/dequeue of 1,000 location value events also allocates 0 bytes.
+- Location tests cover the captured live RMC report, `GPRMC`/`GNRMC`, hemispheres, invalid fixes and checksums, AnyTone UTF-16LE GPS text, malformed-message redaction, and stable grid behavior including the dateline and polar region.
+- Raw MQTT loopback tests verify safe privacy defaults, explicit enable/disable, coordinate rastering, exact opt-out values, actual hotspot ID, null optional values, non-retained publication, SMS redaction, and rejection of invalid grid sizes.
 
 ## Hardware validation
 
@@ -62,15 +80,21 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 - Evidence remains in `/tmp/dmroute-hardware.log`, `/tmp/dmroute-mqtt.log`, and `/tmp/dmroute-hardware.pcap`; these runtime artifacts are intentionally not committed.
 - The Makefile `run` target now names the executable project explicitly and reuses the existing Release build, so it works from the solution root with environment-based configuration.
 - The historical MQTT paths in the 2026-09-12 result remain marked as the topics used by that test run; the current runbook uses the new canonical paths.
+- Two AnyTone location captures were analyzed: the configured fixed beacon and a live satellite fix. A manually sent GPS information message supplied coordinates, speed, and altitude as UTF-16LE TMS text. Exact local coordinates are deliberately omitted from tracked files.
+- The private location captures remain in `/tmp/dmroute-aprs-real.pcap` and `/tmp/dmroute-aprs-gps.pcap` and are intentionally excluded from Git.
+- H08 passed on 2026-09-13 against a local MQTT probe: automatic `NMEA_RMC` and manual `ANYTONE_GPS_TEXT` events carried hotspot ID `1000001`, were non-retained, used the same 10 km grid cell, and stayed within 10 km of the decoded fixes. The paired manual SMS contained only `[GPS position redacted]`; an automated scan found no exact manual coordinate in MQTT and `droppedMqttEvents` remained `0`.
+- The privacy-safe MQTT evidence is `/tmp/dmroute-location-mqtt.log`; `docs/hardware-test-results-2026-09-13-location.adoc` records the result without exact local coordinates.
 
 ## Known limits
 
 - Completed SMS strings and MQTT connection work may allocate by design.
-- MQTT credentials and TLS are not implemented. `sds/gps` is reserved; APRS/raw position traffic currently appears under `diag/unknown_frame` with data type `0x03`.
+- MQTT credentials and TLS are not implemented.
 - A QoS-0 event already removed from the channel can be lost if the TCP publish fails. Retained registry state is reconstructed after reconnect; diagnostic frames longer than `Mqtt:MaxDiagnosticFrameBytes` are truncated.
 - Topology snapshot replacement and initial repeater enrollment allocate outside the steady packet path.
 - The hard allocation guarantee is covered for the listed synchronous processing paths; it does not attempt to include exception construction or enabled logging sinks.
+- The privacy raster applies at the MQTT boundary only. Exact GPS text remains visible to local logging, and IDs, timestamps, speed, course, altitude, and coarse movement remain visible on MQTT. The mechanism reduces precision but is not anonymization or cryptographic location protection.
+- An RMC `A` status proves only what the radio reports. The tested AnyTone also labels its configured fixed beacon as valid, so the radio must use `APRS -> Upload Beacon -> GPS Beacon` for a satellite-derived position.
 
 ## Precise next step
 
-Review PR #7 and merge it after its GitHub checks pass; issues #3 and #6 close through the PR description. Then profile and optimize `RawMqttClient` itself as a separate task; credentials/TLS and a decoded `sds/gps` publisher remain later feature work.
+Review and merge the location telemetry PR after its CI checks pass. Raw MQTT client optimization remains a separate follow-up.

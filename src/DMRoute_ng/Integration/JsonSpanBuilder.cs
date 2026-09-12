@@ -61,12 +61,19 @@ public ref struct JsonSpanBuilder
         _offset += written;
     }
 
-    public void AppendDecimal(ReadOnlySpan<byte> key, double value)
+    public void AppendDecimal(ReadOnlySpan<byte> key, double value, byte precision = 3)
     {
         AppendKey(key);
-        if (!Utf8Formatter.TryFormat(value, _buffer[_offset..], out var written, new StandardFormat('F', 3)))
+        if (!Utf8Formatter.TryFormat(value, _buffer[_offset..], out var written, new StandardFormat('F', precision)))
             throw new ArgumentException("JSON buffer is too small.");
         _offset += written;
+    }
+
+    public void AppendNull(ReadOnlySpan<byte> key)
+    {
+        AppendKey(key);
+        "null"u8.CopyTo(_buffer[_offset..]);
+        _offset += 4;
     }
 
     public void AppendTimestamp(ReadOnlySpan<byte> key, long utcTicks)
