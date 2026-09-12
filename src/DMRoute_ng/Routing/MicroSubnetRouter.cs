@@ -9,7 +9,6 @@ namespace DMRoute_ng.Routing;
 public delegate void DmrDataFrameHandler(ReadOnlySpan<byte> packet);
 public delegate void DmrCallEventHandler(in DmrCallEvent callEvent);
 public delegate void DmrUnknownFrameHandler(ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks);
-public delegate void DmrAprsFrameHandler(int sourceId, int hotspotId, ReadOnlySpan<byte> packet, long occurredAtTicks);
 
 public enum DmrCallEventType : byte
 {
@@ -97,7 +96,6 @@ public sealed partial class MicroSubnetRouter : IDisposable
     public event DmrDataFrameHandler? OnDataFrameReceived;
     public event DmrCallEventHandler? OnCallEvent;
     public event DmrUnknownFrameHandler? OnUnknownFrameReceived;
-    public event DmrAprsFrameHandler? OnAprsReceived;
 
     public long DroppedLocalRouteStates => Interlocked.Read(ref _droppedLocalRouteStates);
     public long DroppedCallStates => Interlocked.Read(ref _droppedCallStates);
@@ -339,15 +337,7 @@ public sealed partial class MicroSubnetRouter : IDisposable
                 }
                 break;
             case 0x03:
-                if (dstId == 990099)
-                {
-                    LogAprs(_logger, srcId);
-                    OnAprsReceived?.Invoke(srcId, hotspotId, packet, now);
-                }
-                else
-                {
-                    LogCsbk(_logger, srcId, dstId);
-                }
+                LogCsbk(_logger, srcId, dstId);
                 break;
             case <= 0x08:
                 lock (_activeCallsLock)
@@ -434,9 +424,6 @@ public sealed partial class MicroSubnetRouter : IDisposable
 
     [LoggerMessage(1006, LogLevel.Debug, "Ziel {DestinationId} (Zone {Zone}) unbekannt oder offline")]
     private static partial void LogUnknownRemoteTarget(ILogger logger, int destinationId, int zone);
-
-    [LoggerMessage(1007, LogLevel.Information, "APRS CSBK-Positionsdaten von {SourceId} empfangen")]
-    private static partial void LogAprs(ILogger logger, int sourceId);
 
     [LoggerMessage(1008, LogLevel.Debug, "CSBK: Signalisierung von {SourceId} an {DestinationId}")]
     private static partial void LogCsbk(ILogger logger, int sourceId, int destinationId);

@@ -1,0 +1,181 @@
+= Location-Telemetrie und MQTT-Privacy
+:toc:
+:sectnums:
+
+== Zweck
+
+DMRoute-ng reassembliert Positionsmeldungen im `SdsGateway` und stellt sie intern als
+`DmrLocationEvent` bereit. Die interne Struktur enthält den dekodierten Fix unverändert.
+Erst der `MqttIntegrationService` entscheidet, ob die exakte oder eine gerasterte
+Position den Master verlässt. Dadurch beeinflusst die Privacy-Berechnung weder das
+DMR-Protokoll noch spätere lokale Integrationen.
+
+Das MQTT-Topic `dmroute/{zoneId}/sds/gps` ist ein nicht-retained Ereignis-Topic.
+Ein Broker speichert die Meldung daher nicht als aktuellen Zustand. QoS 0 und die
+begrenzte MQTT-Queue entsprechen den übrigen Ereignis-Topics.
+
+== Unterstützte Eingaben
+
+=== NMEA RMC
+
+Periodische DMR-APRS-Berichte des getesteten AnyTone werden an die ID `990099`
+gesendet. Die `0x03`-CSBK-Frames kündigen die Datenübertragung lediglich an. Der
+eigentliche NMEA-Satz befindet sich in den anschließend reassemblierten
+`0x06`/`0x07`-Datenblöcken.
+
+Der Decoder erkennt `$GPRMC` und `$GNRMC`, prüft die NMEA-XOR-Prüfsumme und liest
+Fixstatus, Breite, Länge, Geschwindigkeit und Kurs. Geschwindigkeit wird von Knoten
+in Meter pro Sekunde umgerechnet. Bei Status `V` wird ein Ereignis mit
+`fixValid=false` und ohne Koordinaten erzeugt. Ein Satz mit ungültiger Prüfsumme
+wird nicht als Position veröffentlicht.
+
+=== AnyTone GPS-Text
+
+Die Funktion `GPS Info -> Send` des getesteten AnyTone erzeugt eine normale
+UTF-16LE-TMS-Nachricht. Das beobachtete Schema lautet:
+
+[source,text]
+----
+Template:
+52.520000N
+013.405000E
+2026-09-12
+19:52:03
+V:0.0M/S
+H:34.5M
+----
+
+Der Parser liest die vorzeichenlosen Dezimalgrade mit N/S/E/W, Geschwindigkeit in
+`M/S` und Höhe in Metern direkt aus dem Byte-Span. Die Funkgerätezeit besitzt keine
+übertragene Zeitzone und wird daher nicht als UTC interpretiert. MQTT verwendet den
+UTC-Empfangszeitpunkt des Masters.
+
+== Datenfluss und Allokationsgrenze
+
+[source,text]
+----
+DMRD -> FEC-Decoder -> vorab reservierter SDS-Slot -> Span-Parser
+     -> DmrLocationEvent -> bounded MQTT-Channel -> Privacy-Raster -> JSON -> MQTT
+----
+
+FEC-Dekodierung, Reassembly, Parser, synchroner Callback und Einreihen des
+Value-Type-Ereignisses sind Teil des Hot Paths. Sie verwenden keine Strings, kein
+LINQ und keine wachsenden Puffer. JSON-Erzeugung, die optionale Rasterung und TCP-I/O
+laufen im MQTT-Background-Service.
+
+Eine manuell gesendete GPS-Information bleibt lokal als SMS protokollierbar. Bei
+aktivierter MQTT-Privacy wird der Nachrichteninhalt auf dem Broker durch
+`[GPS position redacted]` ersetzt. Bereits die erkannte `Template:`-Signatur löst
+die Redaction aus; auch ein beschädigter GPS-Text darf seine Koordinaten daher nicht
+versehentlich als normale MQTT-SMS veröffentlichen.
+
+== Konfiguration
+
+[cols="2,1,3",options="header"]
+|===
+|Schlüssel |Standard |Bedeutung
+
+|`Mqtt:LocationPrivacyEnabled`
+|`true`
+|Rastert Koordinaten vor dem MQTT-Publish und redigiert GPS-SMS-Texte. `false`
+veröffentlicht die dekodierten Werte und den ursprünglichen SMS-Text exakt.
+
+|`Mqtt:LocationGridKm`
+|`10`
+|Kantenlänge einer Privacy-Zelle in Kilometern. Erlaubt sind endliche Werte größer
+als `0` und höchstens `1000`. Der Wert wird auch bei deaktivierter Privacy geprüft,
+damit eine spätere Aktivierung nicht mit einer ungültigen Konfiguration startet.
+|===
+
+Beispiel für Umgebungsvariablen mit den sicheren Standards:
+
+[source,shell]
+----
+MQTT__LocationPrivacyEnabled=true MQTT__LocationGridKm=10 make run
+----
+
+== Bildung des Rasters
+
+Das Raster ist deterministisch. Derselbe exakte Fix wird mit derselben Konfiguration
+immer auf dasselbe Zellenzentrum abgebildet. Dadurch lassen sich viele Meldungen
+nicht wie bei zufälligem Jitter mitteln, um die ursprüngliche Position wieder
+anzunähern.
+
+Für eine konfigurierte Kantenlänge `g` in Kilometern wird die Höhe einer Zelle in
+Breitengraden angenähert durch:
+
+[stem]
+++++
+Delta latitude = g / 111.32
+++++
+
+Die Breite eines Längengrades hängt vom Breitengrad `phi` ab. Für jede
+Breitengradzelle wird deshalb eine eigene Längengradschrittweite verwendet:
+
+[stem]
+++++
+Delta longitude = g / (111.32 * abs(cos(phi)))
+++++
+
+Breite und Länge werden jeweils dem Zentrum ihrer Zelle zugeordnet. Längengrade
+werden auf den Bereich `[-180, 180)` normalisiert. In unmittelbarer Polnähe, wo ein
+Längengrad keine sinnvolle Strecke mehr beschreibt, fällt das Zellenzentrum auf
+Längengrad `0` zurück.
+
+Bei einer 10 x 10 km großen Zelle liegt ein Punkt höchstens eine halbe
+Zellendiagonale vom veröffentlichten Zentrum entfernt:
+
+[stem]
+++++
+sqrt(5^2 + 5^2) ~~ 7.1 km
+++++
+
+Der synthetische Beispielfix `52.520000 N, 13.405000 E` wird mit dem
+10-km-Standardraster beispielsweise als `52.517068 N, 13.457403 E` veröffentlicht.
+
+== MQTT-Payload
+
+[source,json]
+----
+{
+  "srcId": 10001,
+  "dstId": 990099,
+  "hotspotId": 1000001,
+  "lat": 52.517068,
+  "lon": 13.457403,
+  "speedMps": 0.000,
+  "courseDeg": 133.23,
+  "altitudeM": null,
+  "fixValid": true,
+  "format": "NMEA_RMC",
+  "obfuscated": true,
+  "precisionKm": 10.0,
+  "timestamp": "2026-09-12T18:02:06.0000000Z"
+}
+----
+
+`format` ist derzeit `NMEA_RMC` oder `ANYTONE_GPS_TEXT`. Nicht im Quellformat
+enthaltene Werte werden als `null` ausgegeben. Bei deaktivierter Privacy lautet
+`obfuscated` `false` und `precisionKm` ist `null`.
+
+== Schutzwirkung und Grenzen
+
+Das Raster verhindert, dass ein einzelnes MQTT-Ereignis die exakten Koordinaten
+preisgibt. Es ersetzt keine Broker-Zugriffskontrolle und anonymisiert das Funkgerät
+nicht. Folgende Informationen bleiben sichtbar:
+
+* DMR-Quell- und Ziel-ID sowie die Hotspot-ID,
+* genauer Empfangszeitpunkt,
+* Geschwindigkeit, Kurs und Höhe, soweit das Quellformat sie enthält,
+* grobe Zellwechsel und damit ein grobes Bewegungsprofil.
+
+Wiederholte Fixes innerhalb derselben Zelle liefern dasselbe Zentrum. Beim
+Überschreiten einer Zellgrenze springt die veröffentlichte Position in die nächste
+Zelle; der Zeitpunkt dieses Sprungs kann die Bewegung weiter eingrenzen. Für einen
+öffentlichen Broker ist der Standard deshalb eine praktische Genauigkeitsreduktion,
+kein kryptografischer Standortschutz.
+
+Der NMEA-Status kann die physische Richtigkeit nicht garantieren. Das getestete
+AnyTone sendete auch seinen chinesischen Fixed-Beacon-Werkswert mit Status `A`.
+Am Funkgerät muss für aktuelle Satellitendaten `APRS -> Upload Beacon -> GPS Beacon`
+gewählt sein.

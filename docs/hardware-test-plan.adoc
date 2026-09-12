@@ -186,12 +186,41 @@ MQTT veröffentlicht beide Nachrichten nicht-retained unter `dmroute/100/sds/sms
 
 Bei einem Fehler der bestätigten Übertragung kann zusätzlich eine unbestätigte Gruppen-SDS an TG 9 gesendet werden. Erreichen deren Datenblöcke den Master, sind Encoder und Decoder grundsätzlich kompatibel und der Fehler ist auf den Confirmed-Handshake einzugrenzen.
 
+=== H08: GPS-Dekodierung und MQTT-Privacy
+
+Dieser Schritt setzt einen erreichbaren MQTT-Broker und ein Funkgerät mit GPS-Fix
+voraus. Für das getestete AnyTone AT-D878UV II wird unter
+`APRS -> Upload Beacon -> GPS Beacon` die aktuelle Satellitenposition gewählt.
+`Fixed Beacon` sendet stattdessen die im Codeplug hinterlegte Position und kann
+diese mit gültigem NMEA-Status `A` kennzeichnen.
+
+. `Mqtt:LocationPrivacyEnabled` auf dem Standard `true` und
+  `Mqtt:LocationGridKm` auf `10` belassen.
+. Die unter `GPS -> GPS Info` angezeigte Position notieren.
+. Auf den nächsten automatischen Bericht an `990099` warten.
+. Unter `GPS -> GPS Info` über `Edit -> Confirm -> Send -> Manual Dial` die Position
+  als privaten Eintrag an `10101` senden.
+. Die beiden MQTT-Topics `dmroute/100/sds/gps` und `dmroute/100/sds/sms` sichern.
+
+Für beide Positionswege muss `sds/gps` die IDs und die tatsächliche Hotspot-ID
+enthalten. `obfuscated` ist `true`, `precisionKm` ist `10.0`, und die publizierte
+Position liegt höchstens 10 km vom dekodierten Fix entfernt. Exakte Koordinaten
+dürfen in keinem MQTT-Payload erscheinen. Die manuelle Positionsnachricht erscheint
+unter `sds/sms` ausschließlich als `[GPS position redacted]`.
+
+Das vollständige Rasterverfahren und seine Grenzen beschreibt
+link:components/location-telemetry.adoc[Location-Telemetrie und MQTT-Privacy].
+Der ausgeführte Lauf ist im
+link:hardware-test-results-2026-09-13-location.adoc[Location-Hardware-Testbericht]
+dokumentiert.
+
 == Ergebnisübergabe und Verifikation
 
 Nach dem letzten Schritt zuerst `tcpdump` und danach den Master mit `Ctrl+C` beenden. Für die Auswertung werden benötigt:
 
 * `/tmp/dmroute-hardware.log`,
 * `/tmp/dmroute-hardware.pcap`,
+* bei H08 die MQTT-Payloads von `sds/gps` und `sds/sms`,
 * die notierten Uhrzeiten und das Ergebnis je Schritt (`OK`, `Fehler` oder `nicht ausgeführt`),
 * Hotspot-Modell, Software/Firmware und verwendete Hotspot-ID,
 * bei SMS zusätzlich Hersteller und Modell der Funkgeräte.
@@ -231,4 +260,8 @@ Liegen die Dateien auf derselben Entwicklungsmaschine, genügt die Mitteilung ih
 |H07
 |beide SMS transportiert, vollständig dekodiert und mit korrekten IDs publiziert werden
 |ja
+
+|H08
+|APRS und manueller GPS-Text dekodiert werden und MQTT ausschließlich Rasterkoordinaten beziehungsweise den redigierten SMS-Text enthält
+|ja, bei GPS-Fix und erreichbarem MQTT
 |===

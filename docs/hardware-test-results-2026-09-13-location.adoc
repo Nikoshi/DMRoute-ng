@@ -1,0 +1,65 @@
+= Hardware-Testbericht Location-Telemetrie vom 13. September 2026
+:toc:
+:sectnums:
+
+== Aufbau
+
+Der H08-Test aus link:hardware-test-plan.adoc[dem Hardware-Testplan] wurde mit
+einem DMRoute-ng-Master der Zone `100`, Hotspot `1000001` und dem AnyTone mit
+DMR-ID `10001` durchgeführt. Als Ziel der automatischen DMR-APRS-Übertragung
+wurde `990099` verwendet; die manuelle GPS-Information ging als private SDS an
+`10101`.
+
+Der Master veröffentlichte während des Tests ausschließlich an einen lokalen
+MQTT-Prüfempfänger auf `127.0.0.1:1883`. Aktiv waren die Standardwerte
+`Mqtt:LocationPrivacyEnabled=true` und `Mqtt:LocationGridKm=10`.
+
+Die exakten empfangenen Koordinaten werden weder in diesem Bericht noch in
+Testfixtures gespeichert. Private Rohmitschnitte liegen nur als Laufartefakte
+unter `/tmp`.
+
+== Ergebnisse
+
+[cols="2,1,4",options="header"]
+|===
+|Prüfung |Status |Nachweis
+
+|Automatischer APRS-Bericht
+|Bestanden
+|Die reassemblierten Datenblöcke wurden als gültiger `NMEA_RMC`-Fix erkannt und
+nicht-retained unter `dmroute/100/sds/gps` veröffentlicht. Quell-ID `10001`,
+Ziel-ID `990099` und Hotspot-ID `1000001` stimmten mit dem DMRD-Paket überein.
+
+|Manuelle GPS-Information
+|Bestanden
+|Die UTF-16LE-TMS-Nachricht wurde als `ANYTONE_GPS_TEXT` erkannt. Koordinaten,
+Geschwindigkeit und Höhe wurden dekodiert; der MQTT-Event enthielt wiederum die
+tatsächliche Hotspot-ID und war nicht retained.
+
+|10-km-Raster
+|Bestanden
+|Beide Eingaben wurden auf dasselbe deterministische Zellenzentrum gerastert.
+Das Zentrum war von den jeweiligen dekodierten Fixes weniger als 10 km entfernt.
+`obfuscated` war `true`, `precisionKm` war `10.0`.
+
+|SMS-Redaction
+|Bestanden
+|Der parallele Event unter `dmroute/100/sds/sms` enthielt ausschließlich
+`[GPS position redacted]`. Eine automatisierte Prüfung des vollständigen
+MQTT-Mitschnitts fand keine der exakten manuellen Koordinaten.
+
+|Queue und Verbindung
+|Bestanden
+|Während des Laufs blieb `droppedMqttEvents` bei `0`; Hotspot- und MQTT-Verbindung
+blieben bis zum kontrollierten Shutdown aktiv.
+|===
+
+== Laufartefakte
+
+Der MQTT-Mitschnitt liegt unter `/tmp/dmroute-location-mqtt.log`. Die zuvor für
+die Decoderanalyse aufgezeichneten DMR-APRS-Rohdaten liegen unter
+`/tmp/dmroute-aprs-real.pcap` und `/tmp/dmroute-aprs-gps.pcap`. Diese Dateien
+enthalten Standortdaten und werden absichtlich nicht ins Repository übernommen.
+
+Damit ist H08 für beide vom getesteten AnyTone verwendeten Positionsformate
+abgenommen.

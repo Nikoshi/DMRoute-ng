@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Types;
 
 namespace DMRoute_ng.Integration;
 
@@ -7,6 +8,7 @@ internal enum MqttTelemetryEventType : byte
 {
     Call,
     Sms,
+    Location,
     DiagnosticFrame
 }
 
@@ -33,6 +35,7 @@ internal readonly struct MqttTelemetryEvent
     private MqttTelemetryEvent(
         MqttTelemetryEventType eventType,
         in DmrCallEvent call,
+        in DmrLocationEvent location,
         int sourceId,
         int destinationId,
         int hotspotId,
@@ -43,6 +46,7 @@ internal readonly struct MqttTelemetryEvent
     {
         EventType = eventType;
         Call = call;
+        Location = location;
         SourceId = sourceId;
         DestinationId = destinationId;
         HotspotId = hotspotId;
@@ -54,6 +58,7 @@ internal readonly struct MqttTelemetryEvent
 
     public MqttTelemetryEventType EventType { get; }
     public DmrCallEvent Call { get; }
+    public DmrLocationEvent Location { get; }
     public int SourceId { get; }
     public int DestinationId { get; }
     public int HotspotId { get; }
@@ -63,14 +68,17 @@ internal readonly struct MqttTelemetryEvent
     public DiagnosticFrameSlot? DiagnosticFrame { get; }
 
     public static MqttTelemetryEvent ForCall(in DmrCallEvent call) =>
-        new(MqttTelemetryEventType.Call, call, 0, 0, 0, 0, 0, null, null);
+        new(MqttTelemetryEventType.Call, call, default, 0, 0, 0, 0, 0, null, null);
 
     public static MqttTelemetryEvent ForSms(int sourceId, int destinationId, string message, long occurredAtTicks) =>
-        new(MqttTelemetryEventType.Sms, default, sourceId, destinationId, 0, 0, occurredAtTicks, message, null);
+        new(MqttTelemetryEventType.Sms, default, default, sourceId, destinationId, 0, 0, occurredAtTicks, message, null);
+
+    public static MqttTelemetryEvent ForLocation(in DmrLocationEvent location) =>
+        new(MqttTelemetryEventType.Location, default, location, 0, 0, 0, 0, 0, null, null);
 
     public static MqttTelemetryEvent ForDiagnostic(
         int sourceId, int hotspotId, byte dataType, long occurredAtTicks, DiagnosticFrameSlot slot) =>
-        new(MqttTelemetryEventType.DiagnosticFrame, default, sourceId, 0, hotspotId, dataType,
+        new(MqttTelemetryEventType.DiagnosticFrame, default, default, sourceId, 0, hotspotId, dataType,
             occurredAtTicks, null, slot);
 }
 
@@ -117,6 +125,9 @@ internal sealed class MqttTelemetryQueue
 
     public void EnqueueSms(int sourceId, int destinationId, string message, long occurredAtTicks) =>
         _eventChannel.Writer.TryWrite(MqttTelemetryEvent.ForSms(sourceId, destinationId, message, occurredAtTicks));
+
+    public void EnqueueLocation(in DmrLocationEvent location) =>
+        _eventChannel.Writer.TryWrite(MqttTelemetryEvent.ForLocation(location));
 
     public void EnqueueDiagnostic(
         ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks)

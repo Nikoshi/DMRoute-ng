@@ -18,6 +18,8 @@ Ein Empfänger darf einen Paket-Span nicht speichern oder über ein `await` hina
 
 Kleine Protokollantworten und Decoder-Arbeitsbereiche verwenden `stackalloc`. Variable oder große Daten dürfen nicht dynamisch auf dem Stack reserviert werden.
 
+Der `SdsGateway` reassembliert Datenblöcke in einem beim Start reservierten Speicherbereich. NMEA-RMC- und AnyTone-GPS-Text werden direkt aus diesem Bereich gelesen. Der Decoder erzeugt ein `DmrLocationEvent` als Value Type und reiht es synchron in den begrenzten MQTT-Kanal ein. Erst der MQTT-Worker baut JSON und berechnet bei Bedarf das Privacy-Raster. Damit bleiben Reassembly, Positionserkennung und Event-Übergabe innerhalb der Hot-Path-Garantie.
+
 == Netzwerkpfad
 
 [source,text]

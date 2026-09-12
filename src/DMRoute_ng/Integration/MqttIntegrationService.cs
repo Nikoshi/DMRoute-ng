@@ -14,6 +14,8 @@ namespace DMRoute_ng.Integration;
 public sealed class MqttIntegrationService : BackgroundService
 {
     private const int TopicBufferBytes = 256;
+    private const double MaxLocationGridKilometers = 1000d;
+    private const string RedactedLocationMessage = "[GPS position redacted]";
     private readonly ILogger<MqttIntegrationService> _logger;
     private readonly MicroSubnetRouter _router;
     private readonly SdsGateway _sdsGateway;
@@ -26,6 +28,8 @@ public sealed class MqttIntegrationService : BackgroundService
     private readonly string _mqttHost;
     private readonly int _mqttPort;
     private readonly int _zoneId;
+    private readonly bool _locationPrivacyEnabled;
+    private readonly double _locationGridKilometers;
     private readonly TimeSpan _stateInterval;
     private readonly byte[] _eventPayloadBuffer;
     private readonly byte[] _eventTopicBuffer = new byte[TopicBufferBytes];
@@ -69,6 +73,8 @@ public sealed class MqttIntegrationService : BackgroundService
         _mqttHost = config.GetValue<string>("Mqtt:Host") ??
                     throw new InvalidOperationException("Mqtt:Host is required.");
         _mqttPort = config.GetValue("Mqtt:Port", 1883);
+        _locationPrivacyEnabled = config.GetValue("Mqtt:LocationPrivacyEnabled", true);
+        _locationGridKilometers = config.GetValue("Mqtt:LocationGridKm", 10d);
         var stateIntervalSeconds = config.GetValue("Mqtt:StateIntervalSeconds", 10);
         var eventCapacity = config.GetValue("Mqtt:EventCapacity", 1000);
         var diagnosticCapacity = config.GetValue("Mqtt:DiagnosticFrameCapacity", 128);
@@ -77,6 +83,10 @@ public sealed class MqttIntegrationService : BackgroundService
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_mqttPort);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stateIntervalSeconds);
         ArgumentOutOfRangeException.ThrowIfLessThan(payloadBufferBytes, 32768);
+        if (!double.IsFinite(_locationGridKilometers) ||
+            _locationGridKilometers is <= 0d or > MaxLocationGridKilometers)
+            throw new ArgumentOutOfRangeException("Mqtt:LocationGridKm",
+                $"Location grid size must be finite, positive, and at most {MaxLocationGridKilometers} km.");
 
         _stateInterval = TimeSpan.FromSeconds(stateIntervalSeconds);
         _events = new MqttTelemetryQueue(eventCapacity, diagnosticCapacity, diagnosticFrameBytes);
@@ -103,8 +113,8 @@ public sealed class MqttIntegrationService : BackgroundService
 
         router.OnCallEvent += HandleCallEvent;
         router.OnUnknownFrameReceived += HandleUnknownFrame;
-        router.OnAprsReceived += HandleAprsFrame;
         sdsGateway.OnSmsReceived += HandleSms;
+        sdsGateway.OnLocationReceived += HandleLocation;
     }
 
     public long DroppedEvents => _events.DroppedEvents + Interlocked.Read(ref _serializationDrops);
@@ -200,11 +210,12 @@ public sealed class MqttIntegrationService : BackgroundService
         ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks) =>
         _events.EnqueueDiagnostic(packet, sourceId, hotspotId, dataType, occurredAtTicks);
 
-    private void HandleAprsFrame(int sourceId, int hotspotId, ReadOnlySpan<byte> packet, long occurredAtTicks) =>
-        _events.EnqueueDiagnostic(packet, sourceId, hotspotId, 0x03, occurredAtTicks);
+    private void HandleSms(int sourceId, int destinationId, string message, bool containsLocation) =>
+        _events.EnqueueSms(sourceId, destinationId,
+            containsLocation && _locationPrivacyEnabled ? RedactedLocationMessage : message,
+            DateTime.UtcNow.Ticks);
 
-    private void HandleSms(int sourceId, int destinationId, string message) =>
-        _events.EnqueueSms(sourceId, destinationId, message, DateTime.UtcNow.Ticks);
+    private void HandleLocation(in DmrLocationEvent location) => _events.EnqueueLocation(location);
 
     private void PublishEvent(in MqttTelemetryEvent item)
     {
@@ -216,6 +227,9 @@ public sealed class MqttIntegrationService : BackgroundService
                 break;
             case MqttTelemetryEventType.Sms:
                 PublishSms(item);
+                break;
+            case MqttTelemetryEventType.Location:
+                PublishLocation(item.Location);
                 break;
             case MqttTelemetryEventType.DiagnosticFrame:
                 PublishDiagnostic(item);
@@ -269,6 +283,50 @@ public sealed class MqttIntegrationService : BackgroundService
         builder.Finish();
         _mqttClient.Publish(BuildTopic(_eventTopicBuffer, "diag/unknown_frame"u8),
             _eventPayloadBuffer.AsSpan(0, builder.Length), retain: false);
+    }
+
+    private void PublishLocation(in DmrLocationEvent location)
+    {
+        var latitude = location.Latitude;
+        var longitude = location.Longitude;
+        if (_locationPrivacyEnabled && latitude.HasValue && longitude.HasValue)
+        {
+            LocationPrivacy.SnapToGrid(latitude.Value, longitude.Value, _locationGridKilometers,
+                out var snappedLatitude, out var snappedLongitude);
+            latitude = snappedLatitude;
+            longitude = snappedLongitude;
+        }
+
+        var builder = new JsonSpanBuilder(_eventPayloadBuffer);
+        builder.AppendNumber("srcId"u8, location.SourceId);
+        builder.AppendNumber("dstId"u8, location.DestinationId);
+        builder.AppendNumber("hotspotId"u8, location.HotspotId);
+        AppendNullableDecimal(ref builder, "lat"u8, latitude, 6);
+        AppendNullableDecimal(ref builder, "lon"u8, longitude, 6);
+        AppendNullableDecimal(ref builder, "speedMps"u8, location.SpeedMetersPerSecond, 3);
+        AppendNullableDecimal(ref builder, "courseDeg"u8, location.CourseDegrees, 2);
+        AppendNullableDecimal(ref builder, "altitudeM"u8, location.AltitudeMeters, 1);
+        builder.AppendBool("fixValid"u8, location.FixValid);
+        builder.AppendString("format"u8, location.Format switch
+        {
+            DmrLocationFormat.NmeaRmc => "NMEA_RMC"u8,
+            DmrLocationFormat.AnytoneGpsText => "ANYTONE_GPS_TEXT"u8,
+            _ => "UNKNOWN"u8
+        });
+        builder.AppendBool("obfuscated"u8, _locationPrivacyEnabled);
+        if (_locationPrivacyEnabled) builder.AppendDecimal("precisionKm"u8, _locationGridKilometers, 1);
+        else builder.AppendNull("precisionKm"u8);
+        builder.AppendTimestamp("timestamp"u8, location.OccurredAtTicks);
+        builder.Finish();
+        _mqttClient.Publish(BuildTopic(_eventTopicBuffer, "sds/gps"u8),
+            _eventPayloadBuffer.AsSpan(0, builder.Length), retain: false);
+    }
+
+    private static void AppendNullableDecimal(
+        ref JsonSpanBuilder builder, ReadOnlySpan<byte> key, double? value, byte precision)
+    {
+        if (value.HasValue) builder.AppendDecimal(key, value.Value, precision);
+        else builder.AppendNull(key);
     }
 
     private static ReadOnlySpan<byte> BuildCallPayload(
@@ -490,8 +548,8 @@ public sealed class MqttIntegrationService : BackgroundService
     {
         _router.OnCallEvent -= HandleCallEvent;
         _router.OnUnknownFrameReceived -= HandleUnknownFrame;
-        _router.OnAprsReceived -= HandleAprsFrame;
         _sdsGateway.OnSmsReceived -= HandleSms;
+        _sdsGateway.OnLocationReceived -= HandleLocation;
         base.Dispose();
     }
 }
