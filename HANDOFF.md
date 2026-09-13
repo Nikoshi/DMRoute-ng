@@ -3,7 +3,7 @@
 ## Active work: roadmap synchronization after #11
 
 - PR #18 was merged into `main` as `b849ae0`; GitHub issue #11 was closed automatically.
-- Work is on `docs/sync-roadmap-after-issue-11`, created from the updated `main`.
+- Work is on `docs/sync-roadmap-after-issue-11` in PR #19, created from the updated `main`.
 - Open roadmap issues are #9, #10, and #14 through #17. Issues #16 and #17 were added after the #11 implementation and are now represented in `TODO.md`.
 - Their relative order is intentionally unchanged until the next joint prioritization.
 
@@ -106,4 +106,4 @@ Keep `TODO.md`, GitHub issues and this handoff consistent after the merge of #11
 
 ## Precise next step
 
-Review and merge the roadmap synchronization, then jointly reprioritize issues #9, #10 and #14 through #17 before starting another implementation branch.
+Review and merge PR #19, then jointly reprioritize issues #9, #10 and #14 through #17 before starting another implementation branch.
