@@ -1,11 +1,11 @@
 using System.Buffers.Text;
 using System.Reflection;
 using System.Threading.Channels;
+using DMRoute_ng.Configuration;
 using DMRoute_ng.Gateways;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Routing;
 using DMRoute_ng.Types;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -14,7 +14,6 @@ namespace DMRoute_ng.Integration;
 public sealed class MqttIntegrationService : BackgroundService
 {
     private const int TopicBufferBytes = 256;
-    private const double MaxLocationGridKilometers = 1000d;
     private const string RedactedLocationMessage = "[GPS position redacted]";
     private readonly ILogger<MqttIntegrationService> _logger;
     private readonly MicroSubnetRouter _router;
@@ -59,7 +58,7 @@ public sealed class MqttIntegrationService : BackgroundService
         RepeaterRegistry repeaterRegistry,
         MasterRegistry masterRegistry,
         RoamingRegistry roamingRegistry,
-        IConfiguration config,
+        DmRouteSettings settings,
         RawMqttClient mqttClient)
     {
         _logger = logger;
@@ -69,24 +68,17 @@ public sealed class MqttIntegrationService : BackgroundService
         _masterRegistry = masterRegistry;
         _roamingRegistry = roamingRegistry;
         _mqttClient = mqttClient;
-        _zoneId = config.GetValue("ZoneId", 100);
-        _mqttHost = config.GetValue<string>("Mqtt:Host") ??
-                    throw new InvalidOperationException("Mqtt:Host is required.");
-        _mqttPort = config.GetValue("Mqtt:Port", 1883);
-        _locationPrivacyEnabled = config.GetValue("Mqtt:LocationPrivacyEnabled", true);
-        _locationGridKilometers = config.GetValue("Mqtt:LocationGridKm", 10d);
-        var stateIntervalSeconds = config.GetValue("Mqtt:StateIntervalSeconds", 10);
-        var eventCapacity = config.GetValue("Mqtt:EventCapacity", 1000);
-        var diagnosticCapacity = config.GetValue("Mqtt:DiagnosticFrameCapacity", 128);
-        var diagnosticFrameBytes = config.GetValue("Mqtt:MaxDiagnosticFrameBytes", 1024);
-        var payloadBufferBytes = config.GetValue("Mqtt:PayloadBufferBytes", 32768);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_mqttPort);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stateIntervalSeconds);
-        ArgumentOutOfRangeException.ThrowIfLessThan(payloadBufferBytes, 32768);
-        if (!double.IsFinite(_locationGridKilometers) ||
-            _locationGridKilometers is <= 0d or > MaxLocationGridKilometers)
-            throw new ArgumentOutOfRangeException("Mqtt:LocationGridKm",
-                $"Location grid size must be finite, positive, and at most {MaxLocationGridKilometers} km.");
+        settings.Validate();
+        _zoneId = settings.ZoneId;
+        _mqttHost = settings.Mqtt.Host;
+        _mqttPort = settings.Mqtt.Port;
+        _locationPrivacyEnabled = settings.Mqtt.LocationPrivacyEnabled;
+        _locationGridKilometers = settings.Mqtt.LocationGridKm;
+        var stateIntervalSeconds = settings.Mqtt.StateIntervalSeconds;
+        var eventCapacity = settings.Mqtt.EventCapacity;
+        var diagnosticCapacity = settings.Mqtt.DiagnosticFrameCapacity;
+        var diagnosticFrameBytes = settings.Mqtt.MaxDiagnosticFrameBytes;
+        var payloadBufferBytes = settings.Mqtt.PayloadBufferBytes;
 
         _stateInterval = TimeSpan.FromSeconds(stateIntervalSeconds);
         _events = new MqttTelemetryQueue(eventCapacity, diagnosticCapacity, diagnosticFrameBytes);

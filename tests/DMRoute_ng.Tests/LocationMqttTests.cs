@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using DMRoute_ng.Configuration;
 using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
 using DMRoute_ng.Integration;
@@ -64,7 +65,7 @@ public sealed class LocationMqttTests
             fixture.Repeaters,
             fixture.Masters,
             fixture.Roaming,
-            configuration,
+            DmRouteSettings.FromConfiguration(configuration),
             client);
         await service.StartAsync(timeout.Token);
 
@@ -131,24 +132,14 @@ public sealed class LocationMqttTests
     [InlineData("NaN")]
     public void MqttLocation_RejectsInvalidGridSize(string gridSize)
     {
-        using var fixture = new MqttLocationFixture();
         var settings = new Dictionary<string, string?>
         {
             ["Mqtt:Host"] = "127.0.0.1",
             ["Mqtt:LocationGridKm"] = gridSize
         };
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        using var client = new RawMqttClient("invalid-grid"u8.ToArray());
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => new MqttIntegrationService(
-            NullLogger<MqttIntegrationService>.Instance,
-            fixture.Router,
-            new SdsGateway(NullLogger<SdsGateway>.Instance, fixture.Router, 4, 512),
-            fixture.Repeaters,
-            fixture.Masters,
-            fixture.Roaming,
-            configuration,
-            client));
+        Assert.Throws<ConfigurationValidationException>(() => DmRouteSettings.FromConfiguration(configuration));
     }
 
     private static async Task<List<MqttPublish>> ReceiveLocationMessages(TcpListener listener, CancellationToken token)

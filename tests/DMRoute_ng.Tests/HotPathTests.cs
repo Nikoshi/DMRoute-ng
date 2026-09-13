@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using DMRoute_ng.Configuration;
 using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
 using DMRoute_ng.Integration;
@@ -399,7 +400,7 @@ public sealed class HotPathTests
             fixture.Repeaters,
             fixture.Masters,
             fixture.Roaming,
-            configuration,
+            DmRouteSettings.FromConfiguration(configuration),
             client);
         await service.StartAsync(timeout.Token);
 
