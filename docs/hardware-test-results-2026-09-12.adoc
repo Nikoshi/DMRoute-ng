@@ -82,6 +82,8 @@ Der Mitschnitt enthält 439 eingehende DMRD-Pakete und 155 vom Master zurückges
 
 Die bestätigte SDS `10001` nach `10101` enthält sowohl Datenheader (`0x06`) als auch Rate-3/4-Datenblöcke (`0x08`) in beiden IP-Richtungen. In der Gegenrichtung ist nur der Datenheader vorhanden. Diese Unterscheidung zeigt, dass der Master den Handshake-Frame korrekt routete und das Ausbleiben des Texts vor der Reassembly im Gateway entstand.
 
-== Offene Beobachtung
+== Korrektur der SDS-Beobachtung
 
-Die unbestätigte SDS an TG 9 trägt in den vom Hotspot gelieferten DMRD-Datenframes das Unit-Call-Bit. Der Router behandelt das Ziel deshalb als Teilnehmer-ID der Zone 0, protokolliert `Ziel 9 (Zone 0) unbekannt oder offline` und würde diese Frames bei mehreren Hotspots nicht als Gruppenverkehr verteilen. Der lokale SDS-Decoder arbeitet davon unabhängig und dekodierte den Text korrekt. Vor einem Mehr-Hotspot-Test sollte festgelegt werden, wie Talkgroup-SDS zuverlässig von normalen Unit-Data-Frames unterschieden wird.
+Eine erneute Auswertung des Mitschnitts trennt zwei Bedienversuche, die im ersten Bericht zusammengefasst waren. Die ersten drei SDS-Sequenzen an Ziel 9 tragen tatsächlich das Unit-Call-Bit (`0xE3`, `0xE6`, `0xE8`) und wurden vom Router folgerichtig als private Teilnehmeradresse 9 behandelt. Eine spätere, vollständig übertragene Sequenz trägt dagegen das Group-Call-Bit (`0xA3`, `0xA6`, `0xA7`) und entspricht damit der Kennzeichnung des ebenfalls aufgezeichneten Gruppenrufs auf TG 9.
+
+Der Mitschnitt belegt deshalb keinen Klassifikationsfehler im Router. Er zeigt einen zunächst privat adressierten Sendeversuch und anschließend eine korrekt als Gruppe adressierte SDS. Für eine Aussage über die Verteilung an weitere Hotspots ist weiterhin ein echter Mehr-Hotspot-Test nötig.

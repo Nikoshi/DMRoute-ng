@@ -1,15 +1,14 @@
 # DMRoute-ng handoff
 
-## Active work: location telemetry
+## Active work: configuration wizard (#8)
 
-- Branch `feat/location` was created from merged `origin/main` (`3be538e`); the obsolete local `mqtt` branch was removed.
-- Real hardware evidence was captured before implementation:
-  - `/tmp/dmroute-aprs-real.pcap` contains the AnyTone fixed beacon at `34.2 N, 108.833333 E`.
-  - `/tmp/dmroute-aprs-gps.pcap` contains a live GPS beacon; its exact coordinates remain only in the private runtime artifact.
-  - A manually sent GPS information message decoded as UTF-16LE TMS text with coordinates, speed, and altitude.
-- Approved behavior: decode NMEA RMC and AnyTone GPS text, publish non-retained `sds/gps`, and apply a configurable 10 km MQTT grid by default. Recognized GPS SMS text must be redacted while privacy is enabled.
-- Implemented span-based decoders, a value-type location event, bounded MQTT queue integration, configurable privacy rastering, GPS-SMS redaction, tests, and detailed AsciiDoc documentation.
-- H08 passed live with both the automatic NMEA report and the manual AnyTone GPS-information SDS. The implementation is ready for review on `feat/location`.
+- Branch `feat/config-wizard` was created from the current working tree.
+- Implemented an AOT-safe, dependency-free full-screen setup wizard with basic and advanced settings, masked PSKs, validation, atomic JSON writes and cancellation without changes.
+- Added `--setup`/`-Setup` and `--config`/`-Config`; every existing configuration command-line argument is forwarded unchanged and applied last so it has highest priority.
+- Centralized explicit scalar configuration reads and validation in typed immutable settings shared by startup and MQTT integration. JSON output uses source-generated metadata and reflection serialization is disabled.
+- Added configuration, precedence, JSON and scripted-terminal tests. `make test` passes 60/60 tests and a local `osx-arm64` NativeAOT publish succeeds; the existing release workflow remains responsible for `linux-x64` and `win-x64` publishes.
+- Corrected the 2026-09-12 hardware report: the capture includes an initial unit-addressed SDS attempt to ID 9 and a later correctly flagged group SDS, so it does not demonstrate a router classification defect.
+- GitHub issue #8 was rewritten with the implemented interface and validation evidence and renamed to `Config-Wizard (TUI)`. It remains open and will be closed by the PR on merge.
 
 ## Objective
 
@@ -75,7 +74,7 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 - The real hardware run from 2026-09-12 is documented in `docs/hardware-test-results-2026-09-12.adoc`. Login/keepalive, local and guest group calls, private routing in both directions, MQTT events, timeout/reconnect, and confirmed SDS `10001 -> 10101` passed.
 - Confirmed SDS `10101 -> 10001` reached and returned its CSBK/data header, but the Retevis radio sent no subsequent rate-3/4 blocks. Unconfirmed group SDS from that same radio decoded correctly, localizing the failure to this confirmed handshake rather than DMRoute-ng reassembly.
 - The capture contains 439 inbound and 155 outbound DMRD packets. Private voice frames are paired in both directions; group traffic is not echoed to its source hotspot.
-- Group SDS to TG 9 arrived with the Homebrew unit-call bit set. The decoder published it, but the router treated destination 9 as a Zone 0 unit ID. Multi-hotspot group-SDS classification/routing remains an explicit follow-up.
+- The SDS/TG9 capture was re-evaluated: early attempts were unit-addressed to ID 9, while the final successful sequence carried the group bit. The hardware report now corrects the former router-defect interpretation; a real multi-hotspot distribution test remains future validation.
 - With one RF endpoint, received audio is not proof of master routing. Private-call return routing is verified from outbound DMRD packets in `/tmp/dmroute-hardware.pcap`; group DMRD must not be echoed to its source hotspot.
 - Evidence remains in `/tmp/dmroute-hardware.log`, `/tmp/dmroute-mqtt.log`, and `/tmp/dmroute-hardware.pcap`; these runtime artifacts are intentionally not committed.
 - The Makefile `run` target now names the executable project explicitly and reuses the existing Release build, so it works from the solution root with environment-based configuration.
@@ -97,4 +96,4 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 
 ## Precise next step
 
-Review and merge the location telemetry PR after its CI checks pass. Raw MQTT client optimization remains a separate follow-up.
+Review and merge the PR from `feat/config-wizard`; its `Closes #8` reference will close the issue. The existing release workflow will perform the `linux-x64` and `win-x64` NativeAOT publishes after the test workflow succeeds on the default branch.

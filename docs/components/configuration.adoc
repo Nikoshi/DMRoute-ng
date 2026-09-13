@@ -1,0 +1,96 @@
+= Konfiguration und Setup-Wizard
+:toc:
+:sectnums:
+
+DMRoute-ng kann aus einer JSON-Datei, Umgebungsvariablen und den bisherigen
+.NET-Kommandozeilenargumenten konfiguriert werden. Der integrierte Wizard erzeugt
+eine vollständige JSON-Datei, benötigt keine zusätzliche TUI-Bibliothek und ist
+Bestandteil des NativeAOT-Binaries.
+
+== Aufruf
+
+[source,shell]
+----
+DMRoute-ng --setup
+DMRoute-ng --setup --config /etc/dmroute/dmroute.json
+DMRoute-ng --config /etc/dmroute/dmroute.json
+----
+
+`--setup` und die kompatible Form `-Setup` starten den Wizard. Ohne `--config`
+wird `dmroute.json` im aktuellen Verzeichnis bearbeitet. `--config <Pfad>` und
+`-Config <Pfad>` wählen eine andere Datei. Der Wizard speichert und beendet sich;
+er startet den Router nicht.
+
+Der Wizard benötigt ein interaktives Ein- und Ausgabeterminal. Pfeiltasten wählen
+ein Feld, `Enter` bearbeitet es, `Leertaste` schaltet den Privacy-Wert um, `A`
+blendet die erweiterten Werte ein oder aus, `F10` oder `S` speichert und `Esc`
+bricht ohne Änderung ab. PSKs erscheinen nur maskiert. Das Überschreiben einer
+vorhandenen Datei muss bestätigt werden.
+
+Beim Speichern wird zuerst eine temporäre Datei im Zielverzeichnis geschrieben
+und anschließend atomar ersetzt. Unter Unix erhält sie den Modus `0600`. Die PSKs
+stehen als Klartext in dieser lokalen Datei; ihre Dateirechte müssen deshalb
+geschützt bleiben.
+
+== Priorität
+
+Quellen werden in dieser Reihenfolge von niedriger zu höherer Priorität geladen:
+
+. eingebaute Standardwerte
+. `appsettings.json`
+. die mit `--config` ausgewählte JSON-Datei
+. Umgebungsvariablen
+. bestehende .NET-Kommandozeilenargumente
+
+Die Steuerargumente `--setup` und `--config` werden vor der Übergabe an den
+.NET-Konfigurationsprovider entfernt. Alle übrigen Argumente werden unverändert
+und zuletzt verarbeitet. Ein gezielter Start kann daher weiterhin Werte aus der
+Datei überschreiben:
+
+[source,shell]
+----
+DMRoute-ng --config dmroute.json --Mqtt:Host mqtt.example.net --Mqtt:Port=1884
+----
+
+In Umgebungsvariablen ersetzt ein doppelter Unterstrich den Doppelpunkt, zum
+Beispiel `Mqtt__Host=mqtt.example.net`.
+
+== JSON-Struktur
+
+[source,json]
+----
+{
+  "ZoneId": 100,
+  "ZonePsk": "change-me",
+  "MeshPsk": "change-me",
+  "Routing": {
+    "MaxActiveCalls": 256,
+    "MaxLocalDeviceRoutes": 8192
+  },
+  "Sds": {
+    "MaxSessions": 128,
+    "MaxMessageBytes": 4096
+  },
+  "Mqtt": {
+    "Host": "127.0.0.1",
+    "Port": 1883,
+    "LocationPrivacyEnabled": true,
+    "LocationGridKm": 10,
+    "StateIntervalSeconds": 10,
+    "EventCapacity": 1000,
+    "DiagnosticFrameCapacity": 128,
+    "MaxDiagnosticFrameBytes": 1024,
+    "PayloadBufferBytes": 32768
+  }
+}
+----
+
+Der Basismodus zeigt Zone, PSKs, MQTT-Verbindung und Location-Privacy. Der
+erweiterte Modus zeigt die vorab reservierten Routing-, SDS- und MQTT-Kapazitäten.
+DMRoute-ng validiert dieselben Regeln beim Speichern und bei jedem normalen Start.
+Es gibt kein Live-Reload; eine geänderte Datei wird beim nächsten Prozessstart
+eingelesen.
+
+Die JSON-Ausgabe verwendet source-generierte `System.Text.Json`-Metadaten.
+Reflection-basierte JSON-Serialisierung ist für das ausführbare Projekt
+deaktiviert, damit der Wizard NativeAOT-kompatibel bleibt.
