@@ -2,7 +2,7 @@
 
 ## Active work: virtual Homebrew hotspot and radio test participant (#11)
 
-- Work is on `feat/issue-11-virtual-hotspot`, created from `main` at `2444892` while preserving the existing roadmap edits.
+- Work is on `feat/issue-11-virtual-hotspot` in PR #18, created from `main` at `2444892` while preserving the existing roadmap edits.
 - GitHub issue #11 now contains the implemented protocol scope, API, failure behavior and acceptance criteria.
 - Follow-up issue #14 tracks the interactive CLI/TUI and #15 tracks semantic DMR frame generation after the protocol work in #9 and #10.
 
@@ -102,4 +102,4 @@ Provide a standalone, server-independent Homebrew emulator library that can auth
 
 ## Precise next step
 
-Review and commit `feat/issue-11-virtual-hotspot`, push it and open a PR that closes #11. The full required validation is `make test` in Release; the current result is 68/68 passing tests.
+Review and merge PR #18; its `Closes #11` reference will close the issue. The full required validation is `make test` in Release; the current result is 68/68 passing tests.

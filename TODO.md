@@ -11,7 +11,7 @@ dokumentiert.
 
 | Priorität | Thema | Status | Abhängigkeiten |
 |---:|---|---|---|
-| 1 | [#11 Virtueller Hotspot und Funkgerät für Tests](https://github.com/Nikoshi/DMRoute-ng/issues/11) | Implementiert auf `feat/issue-11-virtual-hotspot`; PR ausstehend | keine |
+| 1 | [#11 Virtueller Hotspot und Funkgerät für Tests](https://github.com/Nikoshi/DMRoute-ng/issues/11) | Implementiert; [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18) offen | keine |
 | 2 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Protokollanalyse erforderlich | Hardware-Captures; anschließend #11 für reproduzierbare Tests |
 | 3 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Schnittstelle und Protokollablauf offen | #11; DMR-Datenencoder |
 | 4 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 |
@@ -39,7 +39,7 @@ Radio Check und ausgehenden SDS.
 
 ### Nächster Schritt
 
-- Branch `feat/issue-11-virtual-hotspot` reviewen und als PR für #11 einreichen.
+- [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18) reviewen und mergen.
 - Nach dem Merge #9 und #10 auf die neue Szenario-API ausrichten.
 
 ### Randbedingungen
