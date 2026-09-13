@@ -214,6 +214,13 @@ Der ausgeführte Lauf ist im
 link:hardware-test-results-2026-09-13-location.adoc[Location-Hardware-Testbericht]
 dokumentiert.
 
+=== H09: Radio Check mit AnyTone und Retevis
+
+Die bidirektionale Aufnahme erfolgreicher und unbeantworteter Radio Checks ist
+ein eigenes Protokollarbeitspaket. Vorbereitung, zwölf Einzelläufe,
+Wiederholungszählung und Ergebnisübergabe beschreibt
+link:radio-check-capture-plan.adoc[der Radio-Check-Capture-Plan].
+
 == Ergebnisübergabe und Verifikation
 
 Nach dem letzten Schritt zuerst `tcpdump` und danach den Master mit `Ctrl+C` beenden. Für die Auswertung werden benötigt:
@@ -264,4 +271,8 @@ Liegen die Dateien auf derselben Entwicklungsmaschine, genügt die Mitteilung ih
 |H08
 |APRS und manueller GPS-Text dekodiert werden und MQTT ausschließlich Rasterkoordinaten beziehungsweise den redigierten SMS-Text enthält
 |ja, bei GPS-Fix und erreichbarem MQTT
+
+|H09
+|Radio-Check-Anfrage, Antwort, Wiederholungen und Timeout für AnyTone und Retevis eindeutig aufgezeichnet sind
+|ja, vor Implementierung von Issue #9
 |===
