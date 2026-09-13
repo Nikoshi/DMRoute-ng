@@ -3,7 +3,7 @@
 ## Active work: roadmap prioritization after #11
 
 - PR #19 was merged into `main` as `f34a953`; `TODO.md` now contains every open roadmap issue.
-- Work is on `docs/prioritize-roadmap`, created from the updated `main`.
+- Work is on `docs/prioritize-roadmap` in PR #20, created from the updated `main`.
 - The next phase prioritizes radio features: #9 first, followed by #10 and the semantic emulator scenarios in #15.
 - AnyTone and Retevis hardware are available for the bidirectional Radio Check captures required by #9.
 
@@ -107,4 +107,4 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Precise next step
 
-Review and merge the roadmap prioritization, then expand issue #9 with a bidirectional AnyTone/Retevis capture plan, protocol fields and acceptance criteria before implementation.
+Review and merge PR #20, then expand issue #9 with a bidirectional AnyTone/Retevis capture plan, protocol fields and acceptance criteria before implementation.
