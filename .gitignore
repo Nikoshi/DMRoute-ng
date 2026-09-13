@@ -31,3 +31,7 @@ Temporary Items
 /tests/DMRoute_ng.Tests/obj
 /tests/DMRoute_ng.Tests/bin
 /tests/DMRoute_ng.Tests/TestResults
+
+# Standalone developer and test tools
+/tools/**/obj
+/tools/**/bin

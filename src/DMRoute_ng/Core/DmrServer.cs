@@ -13,23 +13,58 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Core;
 
-public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, MicroSubnetRouter router)
-    : BackgroundService, IDmrSender
+public sealed partial class DmrServer : BackgroundService, IDmrSender
 {
     private const int DmrPort = 62031;
     private const int ReceiveBufferSize = 1024;
 
+    private readonly ILogger<DmrServer> _logger;
+    private readonly RepeaterRegistry _registry;
+    private readonly MicroSubnetRouter _router;
+    private readonly IPEndPoint _bindEndPoint;
     private readonly byte[] _receiveBuffer = GC.AllocateUninitializedArray<byte>(ReceiveBufferSize, pinned: true);
     private readonly SocketAddress _receiveAddress = new(AddressFamily.InterNetwork, 16);
     private readonly SocketAddress _sendAddress = new(AddressFamily.InterNetwork, 16);
     private readonly object _sendLock = new();
+    private readonly TaskCompletionSource<IPEndPoint> _boundEndPoint =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Socket? _socket;
+
+    public DmrServer(ILogger<DmrServer> logger, RepeaterRegistry registry, MicroSubnetRouter router)
+        : this(logger, registry, router, new IPEndPoint(IPAddress.Any, DmrPort))
+    {
+    }
+
+    internal DmrServer(
+        ILogger<DmrServer> logger,
+        RepeaterRegistry registry,
+        MicroSubnetRouter router,
+        IPEndPoint bindEndPoint)
+    {
+        ArgumentNullException.ThrowIfNull(bindEndPoint);
+        if (bindEndPoint.AddressFamily != AddressFamily.InterNetwork)
+            throw new ArgumentException("Only IPv4 bind endpoints are supported.", nameof(bindEndPoint));
+
+        _logger = logger;
+        _registry = registry;
+        _router = router;
+        _bindEndPoint = new IPEndPoint(bindEndPoint.Address, bindEndPoint.Port);
+    }
+
+    internal IPEndPoint BoundEndPoint =>
+        (IPEndPoint?)_socket?.LocalEndPoint
+        ?? throw new InvalidOperationException("The DMR server is not running.");
+
+    internal Task<IPEndPoint> WaitUntilBoundAsync(CancellationToken cancellationToken) =>
+        _boundEndPoint.Task.WaitAsync(cancellationToken);
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _socket.Bind(new IPEndPoint(IPAddress.Any, DmrPort));
-        logger.LogInformation("DMRoute_ng Server lauscht auf UDP Port {Port}", DmrPort);
+        _socket.Bind(_bindEndPoint);
+        var boundEndPoint = BoundEndPoint;
+        _boundEndPoint.TrySetResult(boundEndPoint);
+        _logger.LogInformation("DMRoute_ng Server lauscht auf UDP Port {Port}", boundEndPoint.Port);
 
         return Task.Factory.StartNew(
             () => ReceiveLoop(stoppingToken),
@@ -56,7 +91,7 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
                 }
                 catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                 {
-                    logger.LogError(ex, "Fehler beim Verarbeiten des UDP-Pakets");
+                    _logger.LogError(ex, "Fehler beim Verarbeiten des UDP-Pakets");
                 }
             }
         }
@@ -80,12 +115,12 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
         if (payload.StartsWith(PacketUtils.RptlHeader)) HandleRptl(payload, remoteEndPoint);
         else if (payload.StartsWith(PacketUtils.RptkHeader)) HandleRptk(payload);
         else if (payload.StartsWith(PacketUtils.RptPingHeader)) HandleRptPing(payload, remoteEndPoint);
-        else if (payload.StartsWith(PacketUtils.DmrdHeader)) router.RouteDmrd(payload, remoteEndPoint, this);
+        else if (payload.StartsWith(PacketUtils.DmrdHeader)) _router.RouteDmrd(payload, remoteEndPoint, this);
         else if (payload.StartsWith(PacketUtils.RptcHeader)) HandleRptc(payload, remoteEndPoint);
         else if (payload.StartsWith(PacketUtils.DmrcHeader) && payload.Length >= 8)
         {
             var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(4, 4));
-            logger.LogInformation("<-- DMRC (Hotspot Config Update) von ID {RepeaterId}", repeaterId);
+            _logger.LogInformation("<-- DMRC (Hotspot Config Update) von ID {RepeaterId}", repeaterId);
             SendRptAck((uint)repeaterId, remoteEndPoint);
         }
     }
@@ -95,9 +130,9 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
         if (payload.Length < 8) return;
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload[4..8]);
 
-        if (!registry.TryGet(repeaterId, out var repeater))
+        if (!_registry.TryGet(repeaterId, out var repeater))
         {
-            logger.LogWarning("Repeater {RepeaterId} ist nicht registriert (Whitelist)", repeaterId);
+            _logger.LogWarning("Repeater {RepeaterId} ist nicht registriert (Whitelist)", repeaterId);
             SendMstNak(repeaterId, endPoint);
             return;
         }
@@ -115,7 +150,7 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
 
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload[4..8]);
         var receivedHash = payload[8..40];
-        if (!registry.TryGetExisting(repeaterId, out var repeater) || repeater.EndPoint is not { } endPoint) return;
+        if (!_registry.TryGetExisting(repeaterId, out var repeater) || repeater.EndPoint is not { } endPoint) return;
 
         var pskLength = Encoding.ASCII.GetByteCount(repeater.PreSharedKey);
         var rented = ArrayPool<byte>.Shared.Rent(4 + pskLength);
@@ -134,12 +169,12 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
                 var now = DateTime.UtcNow.Ticks;
                 Volatile.Write(ref repeater.LastPingTicks, now);
                 Volatile.Write(ref repeater.LoggedInSinceTicks, now);
-                registry.RefreshRoutingSnapshot();
+                _registry.RefreshRoutingSnapshot();
                 SendRptAck((uint)repeaterId, endPoint);
             }
             else
             {
-                logger.LogWarning("--> MSTNAK (Hashes stimmen nicht überein für {RepeaterId}. Falsches Passwort?)", repeaterId);
+                _logger.LogWarning("--> MSTNAK (Hashes stimmen nicht überein für {RepeaterId}. Falsches Passwort?)", repeaterId);
                 SendMstNak(repeaterId, endPoint);
             }
         }
@@ -154,14 +189,14 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
         if (payload.Length < 11) return;
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload[7..11]);
 
-        if (registry.TryGetExisting(repeaterId, out var repeater))
+        if (_registry.TryGetExisting(repeaterId, out var repeater))
         {
             if (repeater is { State: RepeaterState.Disconnected, EndPoint: not null } && repeater.EndPoint.Value == endPoint)
             {
-                logger.LogInformation("Soft-Reconnect durch Ping für Repeater {RepeaterId}", repeaterId);
+                _logger.LogInformation("Soft-Reconnect durch Ping für Repeater {RepeaterId}", repeaterId);
                 repeater.State = RepeaterState.LoggedIn;
                 Volatile.Write(ref repeater.LoggedInSinceTicks, DateTime.UtcNow.Ticks);
-                registry.RefreshRoutingSnapshot();
+                _registry.RefreshRoutingSnapshot();
             }
 
             if (repeater.State == RepeaterState.LoggedIn && repeater.EndPoint is { } target)
@@ -172,7 +207,7 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
             }
         }
 
-        LogUnknownPing(logger, repeaterId);
+        LogUnknownPing(_logger, repeaterId);
         SendMstNak(repeaterId, endPoint);
     }
 
@@ -183,20 +218,20 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
         if (payload.Length < offset + 4) return;
 
         var repeaterId = BinaryPrimitives.ReadInt32BigEndian(payload.Slice(offset, 4));
-        if (!registry.TryGetExisting(repeaterId, out var repeater)) return;
+        if (!_registry.TryGetExisting(repeaterId, out var repeater)) return;
 
         if (isRptcl)
         {
-            logger.LogInformation("<-- RPTCL (Disconnect) von ID {RepeaterId}", repeaterId);
+            _logger.LogInformation("<-- RPTCL (Disconnect) von ID {RepeaterId}", repeaterId);
             repeater.State = RepeaterState.Disconnected;
             Volatile.Write(ref repeater.LastPingTicks, 0);
             Volatile.Write(ref repeater.LoggedInSinceTicks, 0);
-            registry.RefreshRoutingSnapshot();
+            _registry.RefreshRoutingSnapshot();
             return;
         }
 
         Volatile.Write(ref repeater.LastPingTicks, DateTime.UtcNow.Ticks);
-        logger.LogInformation("<-- RPTC (Config) von ID {RepeaterId}", repeaterId);
+        _logger.LogInformation("<-- RPTC (Config) von ID {RepeaterId}", repeaterId);
         var configPayload = payload.Slice(offset + 4);
         if (!configPayload.IsEmpty)
         {
@@ -218,15 +253,15 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
 
                 repeater.Configuration = new RepeaterConfiguration(callsign, rxFreq, txFreq, txPower, colorCode,
                     lat, lon, height, location, description, url, software, package);
-                logger.LogDebug("RPTC Metadaten für {Id} aktualisiert: {Callsign} / {Software}", repeaterId, callsign, software);
+                _logger.LogDebug("RPTC Metadaten für {Id} aktualisiert: {Callsign} / {Software}", repeaterId, callsign, software);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Fehler beim Parsen der RPTC-Metadaten für Repeater {Id}", repeaterId);
+                _logger.LogWarning(ex, "Fehler beim Parsen der RPTC-Metadaten für Repeater {Id}", repeaterId);
             }
         }
 
-        logger.LogInformation("--> RPTACK (Config bestätigt für {RepeaterId})", repeaterId);
+        _logger.LogInformation("--> RPTACK (Config bestätigt für {RepeaterId})", repeaterId);
         SendRptAck((uint)repeaterId, repeater.EndPoint ?? endPoint);
     }
 
@@ -245,7 +280,7 @@ public sealed partial class DmrServer(ILogger<DmrServer> logger, RepeaterRegistr
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Fehler beim Senden an {Endpoint}", endPoint);
+            _logger.LogError(ex, "Fehler beim Senden an {Endpoint}", endPoint);
         }
     }
 
