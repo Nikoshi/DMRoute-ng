@@ -3,7 +3,7 @@
 ## Active work: Radio Check capture preparation for #9
 
 - PR #20 was merged into `main` as `acc4860` and established #9 as the next work package.
-- Work is on `feat/issue-9-radio-check`, created from the updated `origin/main`.
+- Work is on `feat/issue-9-radio-check` in draft PR #22, created from the updated `origin/main`.
 - The German bidirectional AnyTone/Retevis capture procedure is prepared; the physical run is the next gate.
 - Follow-up issue #21 tracks master-initiated Radio Checks and later roaming expiry integration.
 
@@ -38,6 +38,7 @@ Capture successful and unanswered Radio Checks from both radio families, derive 
 ## Current state
 
 - `docs/radio-check-capture-plan.adoc` defines setup, route priming, twelve recorded runs, observation fields, retry counting and evidence handling.
+- GitHub issue #9 contains the agreed passive event contract and capture gate; issue #21 contains the deferred active-send and roaming scope.
 - Existing captures contain voice, APRS and SDS traffic but no deliberately triggered Radio Check.
 - `MicroSubnetRouter` already routes private DMRD packets byte-for-byte. It does not decode CSBK content, and a low-nibble `0x03` without the data-sync bit is a Voice-C burst rather than CSBK.
 - Local raw capture formats and the `captures/` directory are excluded through `.gitignore`; evidence remains under `/tmp`.
@@ -117,4 +118,4 @@ Capture successful and unanswered Radio Checks from both radio families, derive 
 
 ## Precise next step
 
-Run `docs/radio-check-capture-plan.adoc` with the AnyTone and Retevis, then provide the three `/tmp/dmroute-radio-check*` artifacts and the twelve timestamped device results for protocol analysis.
+Run `docs/radio-check-capture-plan.adoc` with the AnyTone and Retevis, then provide the three `/tmp/dmroute-radio-check*` artifacts and the twelve timestamped device results for protocol analysis and completion of draft PR #22.
