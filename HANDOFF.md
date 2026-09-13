@@ -1,17 +1,21 @@
 # DMRoute-ng handoff
 
-## Active work: virtual Homebrew hotspot and radio test participant (#11)
+## Active work: roadmap synchronization after #11
 
-- Work is on `feat/issue-11-virtual-hotspot` in PR #18, created from `main` at `2444892` while preserving the existing roadmap edits.
-- GitHub issue #11 now contains the implemented protocol scope, API, failure behavior and acceptance criteria.
-- Follow-up issue #14 tracks the interactive CLI/TUI and #15 tracks semantic DMR frame generation after the protocol work in #9 and #10.
+- PR #18 was merged into `main` as `b849ae0`; GitHub issue #11 was closed automatically.
+- Work is on `docs/sync-roadmap-after-issue-11`, created from the updated `main`.
+- Open roadmap issues are #9, #10, and #14 through #17. Issues #16 and #17 were added after the #11 implementation and are now represented in `TODO.md`.
+- Their relative order is intentionally unchanged until the next joint prioritization.
 
 ## Objective
 
-Provide a standalone, server-independent Homebrew emulator library that can authenticate virtual hotspots, replay recorded radio scenarios and verify master responses through real UDP loopback tests. Preserve the production server's NativeAOT and zero-allocation hot-path behavior.
+Keep `TODO.md`, GitHub issues and this handoff consistent after the merge of #11, then choose the next work package explicitly.
 
 ## Decisions
 
+- Issue #11 is complete and moves out of the active roadmap. PR #18 and merge commit `b849ae0` remain recorded under completed work.
+- Issues #16 and #17 are appended after the previously ordered work. No new priority is inferred from their creation time.
+- Only confirmed dependencies are recorded for #17; its hardware boundary and further dependencies remain part of its planning work.
 - `tools/DMRoute_ng.Emulator` is a .NET 9 core library with no reference to the DMRoute-ng server assembly or xUnit. A later CLI/TUI will consume its public API.
 - `VirtualHotspot` owns the UDP session and models login, configuration, keepalive, disconnect, bounded DMRD capture and explicit protocol states. `VirtualRadio` replays owned `RadioScenario` frames with relative timing.
 - The first version replays sanitized captured DMRD frames. Semantic voice, CSBK and SDS generation is deferred to #15.
@@ -102,4 +106,4 @@ Provide a standalone, server-independent Homebrew emulator library that can auth
 
 ## Precise next step
 
-Review and merge PR #18; its `Closes #11` reference will close the issue. The full required validation is `make test` in Release; the current result is 68/68 passing tests.
+Review and merge the roadmap synchronization, then jointly reprioritize issues #9, #10 and #14 through #17 before starting another implementation branch.

@@ -11,45 +11,14 @@ dokumentiert.
 
 | Priorität | Thema | Status | Abhängigkeiten |
 |---:|---|---|---|
-| 1 | [#11 Virtueller Hotspot und Funkgerät für Tests](https://github.com/Nikoshi/DMRoute-ng/issues/11) | Implementiert; [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18) offen | keine |
-| 2 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Protokollanalyse erforderlich | Hardware-Captures; anschließend #11 für reproduzierbare Tests |
-| 3 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Schnittstelle und Protokollablauf offen | #11; DMR-Datenencoder |
-| 4 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 |
-| 5 | [#15 Semantische DMR-Szenarien im Emulator](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Protokollanalyse erforderlich | #11, #9 und #10 |
+| 1 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Protokollanalyse erforderlich | Hardware-Captures; Testharness aus #11 verfügbar |
+| 2 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Schnittstelle und Protokollablauf offen | #11 erfüllt; DMR-Datenencoder |
+| 3 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 erfüllt |
+| 4 | [#15 Semantische DMR-Szenarien im Emulator](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Protokollanalyse erforderlich | #11 erfüllt; #9 und #10 |
+| 5 | [#16 Testorchestrator für mehrere Master](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #11 erfüllt |
+| 6 | [#17 Virtuelles Funkgerät kommuniziert mit echtem Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Planung erforderlich | #11 erfüllt; weitere Abhängigkeiten offen |
 
-## 1. Virtueller Hotspot und Funkgerät für Tests (#11)
-
-### Ziel
-
-Ein Testteilnehmer soll sich gegenüber `DmrServer` wie ein echter
-Homebrew-Hotspot verhalten und definierte DMRD-Paketfolgen senden sowie Antworten
-des Masters prüfen können. Er bildet die Grundlage für reproduzierbare Tests von
-Radio Check und ausgehenden SDS.
-
-### Umgesetzter Umfang
-
-- `DMRoute_ng.Emulator` ist eine eigenständige Core-Bibliothek ohne Referenz auf
-  den Server oder xUnit.
-- Anmeldung mit `RPTL`, Challenge, `RPTK` und `RPTC`, Keepalive mit
-  `RPTPING`/`MSTPONG`, `RPTCL` und `MSTNAK` sind umgesetzt.
-- `VirtualRadio` spielt zeitgesteuerte, aufgezeichnete DMRD-Szenarien ein;
-  `VirtualHotspot` zeichnet weitergeleitete Frames in einem begrenzten Puffer auf.
-- Loopback-Tests decken zwei Hotspots, Routing ohne Gruppenecho, falschen PSK,
-  fremde Zonen-ID, Timeout, Soft-Reconnect und Neuanmeldung ab.
-
-### Nächster Schritt
-
-- [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18) reviewen und mergen.
-- Nach dem Merge #9 und #10 auf die neue Szenario-API ausrichten.
-
-### Randbedingungen
-
-- Der Emulator liegt im Testprojekt oder in einem separaten Testwerkzeug und wird
-  nicht Bestandteil des produktiven NativeAOT-Binaries.
-- Tests verwenden Loopback-Sockets und feste Zeitgrenzen.
-- Protokollbytes werden mit fokussierten Writer- und Parser-Tests abgesichert.
-
-## 2. Check Device (#9)
+## 1. Check Device (#9)
 
 ### Ziel
 
@@ -75,7 +44,7 @@ Klärung des grundlegenden Protokollablaufs bewertet.
 - Paketwriter verwenden caller-eigene `Span<byte>`-Puffer und bleiben
   NativeAOT-kompatibel.
 
-## 3. SDS an Funkgerät senden (#10)
+## 2. SDS an Funkgerät senden (#10)
 
 ### Ziel
 
@@ -107,7 +76,7 @@ Rückmeldung, Betriebsaufwand und NativeAOT-Unterstützung.
 - Writer erhalten Zielpuffer vom Aufrufer; variable Paketarrays, Reflection und
   dynamische Codeerzeugung sind im produktiven Pfad ausgeschlossen.
 
-## 4. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
+## 3. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
 
 ### Ziel
 
@@ -121,7 +90,7 @@ vorhandene Szenarien ab, ohne den Emulator an den Server zu koppeln.
   Issue festlegen.
 - Entscheiden, ob zuerst eine skriptbare CLI oder direkt eine TUI entsteht.
 
-## 5. Semantische DMR-Szenarien im Emulator (#15)
+## 4. Semantische DMR-Szenarien im Emulator (#15)
 
 ### Ziel
 
@@ -135,6 +104,45 @@ und SDS aus semantischen Eingaben erzeugen können, statt nur Captures abzuspiel
 - Eine serverunabhängige Projektgrenze für gemeinsam nutzbare Protokollbausteine
   festlegen.
 
+## 5. Testorchestrator für mehrere Master (#16)
+
+### Ziel
+
+Ein unabhängiges Testwerkzeug soll beliebig viele DMRoute-ng-Master starten,
+miteinander verbinden und gemeinsam mit den Teilnehmern aus #11 steuern können.
+
+### Nächster Schritt
+
+- Prozessmodell, dynamische Ports, Topologiekonfiguration sowie Start-,
+  Bereitschafts- und Stoppverhalten festlegen.
+- Beobachtbare Zustände, Fehlerfälle und Abnahmekriterien im Issue ergänzen.
+
+### Randbedingungen
+
+- Der Orchestrator bleibt in einem eigenen Projekt vom Server unabhängig.
+- Die virtuellen Hotspots und Funkgeräte aus #11 bilden die Teilnehmerseite der
+  späteren Mehrmaster-Szenarien.
+
+## 6. Virtuelles Funkgerät kommuniziert mit echtem Funkgerät (#17)
+
+### Ziel
+
+Der virtuelle Teilnehmer aus #11 soll später Tests mit einem echten Funkgerät
+ermöglichen, beispielsweise den Versand einer SDS an das reale Gerät.
+
+### Nächster Schritt
+
+- RF-/Hardware-Grenze, Nachrichtenrichtung, unterstützte Geräte und benötigte
+  Protokollbausteine klären.
+- Abhängigkeiten, Sicherheitsgrenzen und Abnahmekriterien anschließend im Issue
+  festlegen.
+
+### Randbedingungen
+
+- #11 stellt nur die bestätigte technische Grundlage bereit; weitere
+  Abhängigkeiten werden erst bei der Ausarbeitung festgelegt.
+- Vor einer Implementierung ist ein Hardware- und Protokollkonzept erforderlich.
+
 ## Spätere Hardware-Validierung
 
 - Gruppen-SDS mit mindestens zwei angemeldeten Hotspots prüfen. Der vorhandene
@@ -145,6 +153,9 @@ und SDS aus semantischen Eingaben erzeugen können, statt nur Captures abzuspiel
 
 ## Abgeschlossen
 
+- [#11 Virtueller Homebrew-Hotspot und Funkgerät für Tests](https://github.com/Nikoshi/DMRoute-ng/issues/11),
+  umgesetzt mit [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18): am
+  13. September 2026 als `b849ae0` gemergt und durch den PR geschlossen.
 - [#8 Config-Wizard](https://github.com/Nikoshi/DMRoute-ng/issues/8), umgesetzt
   mit [PR #13](https://github.com/Nikoshi/DMRoute-ng/pull/13): gemergt und durch
   den PR geschlossen.
