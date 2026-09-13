@@ -59,6 +59,28 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
         if (count != snapshot.Length) Array.Resize(ref snapshot, count);
         _routingSnapshot = snapshot;
     }
+
+    internal void DisconnectIdleRepeaters(long nowTicks)
+    {
+        var cutoffTicks = nowTicks - TimeSpan.FromSeconds(45).Ticks;
+
+        foreach (var kvp in _repeaters)
+        {
+            var repeater = kvp.Value;
+            if (repeater.State != RepeaterState.LoggedIn) continue;
+
+            var lastPing = Volatile.Read(ref repeater.LastPingTicks);
+            if (lastPing <= 0 || lastPing >= cutoffTicks) continue;
+
+            var secondsIdle = (nowTicks - lastPing) / TimeSpan.TicksPerSecond;
+            logger.LogInformation("Timeout für Repeater {Id} nach {Seconds}s Inaktivität. Setze auf Disconnected", repeater.Id, secondsIdle);
+
+            repeater.State = RepeaterState.Disconnected;
+            Volatile.Write(ref repeater.LastPingTicks, 0);
+            Volatile.Write(ref repeater.LoggedInSinceTicks, 0);
+        }
+
+    }
     
     // ReSharper disable once CognitiveComplexity
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -67,26 +89,7 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
         
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            long cutoffTicks = DateTime.UtcNow.AddSeconds(-45).Ticks;
-
-            foreach (var kvp in _repeaters)
-            {
-                var repeater = kvp.Value;
-                if (repeater.State == RepeaterState.LoggedIn)
-                {
-                    var lastPing = Volatile.Read(ref repeater.LastPingTicks);
-                    
-                    if (lastPing > 0 && lastPing < cutoffTicks)
-                    {
-                        var secondsIdle = (DateTime.UtcNow.Ticks - lastPing) / TimeSpan.TicksPerSecond;
-                        logger.LogInformation("Timeout für Repeater {Id} nach {Seconds}s Inaktivität. Setze auf Disconnected", repeater.Id, secondsIdle);
-                        
-                        repeater.State = RepeaterState.Disconnected;
-                        Volatile.Write(ref repeater.LastPingTicks, 0);
-                        Volatile.Write(ref repeater.LoggedInSinceTicks, 0);
-                    }
-                }
-            }
+            DisconnectIdleRepeaters(DateTime.UtcNow.Ticks);
         }
     }
 }

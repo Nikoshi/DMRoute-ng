@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DMRoute_ng\DMRoute-ng.csproj" />
+    <ProjectReference Include="..\..\tools\DMRoute_ng.Emulator\DMRoute_ng.Emulator.csproj" />
   </ItemGroup>
 
 </Project>

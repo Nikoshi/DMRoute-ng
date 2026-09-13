@@ -18,6 +18,10 @@
 - Do not describe a path as zero-allocation unless an allocation test covers it.
 - Preserve protocol byte layouts and add focused tests for packet writers and parsers.
 
+## Documentation
+
+- Write README and AsciiDoc documentation in German.
+
 ## Working state
 
 - Keep `HANDOFF.md` current while working. Record completed changes, validation results, known limitations, and the precise next step so another agent can continue without reconstructing context.

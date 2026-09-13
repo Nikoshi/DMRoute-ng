@@ -1,21 +1,21 @@
 # DMRoute-ng handoff
 
-## Active work: configuration wizard (#8)
+## Active work: virtual Homebrew hotspot and radio test participant (#11)
 
-- Branch `feat/config-wizard` was created from the current working tree.
-- Implemented an AOT-safe, dependency-free full-screen setup wizard with basic and advanced settings, masked PSKs, validation, atomic JSON writes and cancellation without changes.
-- Added `--setup`/`-Setup` and `--config`/`-Config`; every existing configuration command-line argument is forwarded unchanged and applied last so it has highest priority.
-- Centralized explicit scalar configuration reads and validation in typed immutable settings shared by startup and MQTT integration. JSON output uses source-generated metadata and reflection serialization is disabled.
-- Added configuration, precedence, JSON and scripted-terminal tests. `make test` passes 60/60 tests and a local `osx-arm64` NativeAOT publish succeeds; the existing release workflow remains responsible for `linux-x64` and `win-x64` publishes.
-- Corrected the 2026-09-12 hardware report: the capture includes an initial unit-addressed SDS attempt to ID 9 and a later correctly flagged group SDS, so it does not demonstrate a router classification defect.
-- GitHub issue #8 was rewritten with the implemented interface and validation evidence and renamed to `Config-Wizard (TUI)`. It remains open and will be closed by the PR on merge.
+- Work is on `feat/issue-11-virtual-hotspot`, created from `main` at `2444892` while preserving the existing roadmap edits.
+- GitHub issue #11 now contains the implemented protocol scope, API, failure behavior and acceptance criteria.
+- Follow-up issue #14 tracks the interactive CLI/TUI and #15 tracks semantic DMR frame generation after the protocol work in #9 and #10.
 
 ## Objective
 
-Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up within configured capacities. The current work package replaces the provisional MQTT topics with the canonical `sys`, `routing`, `call`, `sds`, and `diag` tree while retaining the project's `RawMqttClient`.
+Provide a standalone, server-independent Homebrew emulator library that can authenticate virtual hotspots, replay recorded radio scenarios and verify master responses through real UDP loopback tests. Preserve the production server's NativeAOT and zero-allocation hot-path behavior.
 
 ## Decisions
 
+- `tools/DMRoute_ng.Emulator` is a .NET 9 core library with no reference to the DMRoute-ng server assembly or xUnit. A later CLI/TUI will consume its public API.
+- `VirtualHotspot` owns the UDP session and models login, configuration, keepalive, disconnect, bounded DMRD capture and explicit protocol states. `VirtualRadio` replays owned `RadioScenario` frames with relative timing.
+- The first version replays sanitized captured DMRD frames. Semantic voice, CSBK and SDS generation is deferred to #15.
+- Production binding remains `0.0.0.0:62031`; internal test hooks allow port `0`, await socket readiness and trigger the existing 45-second repeater liveness sweep deterministically.
 - Small decentralized deployment defaults: 256 active calls, 8,192 learned local routes, 128 SDS sessions, and 4,096 bytes per SDS message.
 - When a bounded table is full, continue routing but do not add new tracking state. Increment a diagnostic counter instead.
 - Packet callbacks are synchronous and borrow `ReadOnlySpan<byte>` data only for the duration of the callback.
@@ -26,6 +26,10 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 
 ## Current state
 
+- Homebrew packet writers cover RPTL, RPTK, the complete 302-byte RPTC layout, RPTPING and RPTCL; response parsers cover RPTACK, MSTPONG and MSTNAK.
+- The emulator rejects non-IPv4 endpoints, invalid capacities/timeouts, non-ASCII Homebrew fields, mismatched radio IDs and DMRD frames for another hotspot.
+- Integration tests log in two concurrent hotspots on ephemeral loopback ports, persist RPTC metadata, exercise manual and periodic ping, forward a captured group-data frame byte-for-byte and prove that the source receives no echo.
+- Negative integration tests cover a wrong PSK, a foreign-zone ID, liveness timeout, same-endpoint soft reconnect, RPTCL and full reauthentication.
 - Baseline before the optimization was 11/11 passing Release tests.
 - Static analysis identified per-datagram allocation in `UdpClient.ReceiveAsync`, packet/endpoint copies in router events, allocating `ConcurrentDictionary` enumeration and value updates, `List<byte>`/`ToArray()` SDS reassembly, and array-returning ping builders.
 - `AGENTS.md` now records the performance and verification contract.
@@ -54,7 +58,7 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 ## Validation
 
 - Release build succeeds with 0 warnings and 0 errors.
-- `make test` passes 48/48 tests in Release mode.
+- `make test` passes 68/68 tests in Release mode.
 - Warmed allocation tests report 0 bytes for group routing, known ping, unknown DMRD/ping, new state within reserved capacity, a full call table and SDS header ingestion.
 - UDP `SocketAddress` round-trip and real loopback send tests pass.
 - MQTT fragmented-CONNACK and publish-wire-format integration test passes.
@@ -86,6 +90,8 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 
 ## Known limits
 
+- The emulator currently has only a programmatic API and recorded-frame replay; interactive use and semantic frame generation are tracked in #14 and #15.
+- UDP is intentionally IPv4-only, matching the server. Emulator receive queues are bounded and fail visibly on overflow.
 - Completed SMS strings and MQTT connection work may allocate by design.
 - MQTT credentials and TLS are not implemented.
 - A QoS-0 event already removed from the channel can be lost if the TCP publish fails. Retained registry state is reconstructed after reconnect; diagnostic frames longer than `Mqtt:MaxDiagnosticFrameBytes` are truncated.
@@ -96,4 +102,4 @@ Keep UDP/DMR routing and SDS ingestion allocation-free after startup and warm-up
 
 ## Precise next step
 
-Review and merge the PR from `feat/config-wizard`; its `Closes #8` reference will close the issue. The existing release workflow will perform the `linux-x64` and `win-x64` NativeAOT publishes after the test workflow succeeds on the default branch.
+Review and commit `feat/issue-11-virtual-hotspot`, push it and open a PR that closes #11. The full required validation is `make test` in Release; the current result is 68/68 passing tests.
