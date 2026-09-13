@@ -1,0 +1,214 @@
+= Radio-Check-Capture mit AnyTone und Retevis
+:toc:
+:sectnums:
+
+== Ziel und Abgrenzung
+
+Dieser Test zeichnet die vom AnyTone und vom Retevis verwendeten
+Radio-Check-PDUs in beiden Richtungen auf. Erfolgreiche und unbeantwortete
+Prüfungen werden getrennt wiederholt, damit Anfrage, Antwort,
+Funkwiederholungen und Timeout belastbar beschrieben werden können.
+
+Der erste Ausbau von Issue #9 soll beobachtete Radio Checks erkennen,
+unverändert routen und als zusammengefassten Vorgang in Log und MQTT melden.
+Aktiv vom Master gestartete Prüfungen sind Gegenstand von Issue #21.
+
+Die vorhandenen Mitschnitte enthalten Sprach-, APRS- und SDS-Verkehr, aber
+keinen bewusst ausgelösten Radio Check. Aus ihnen darf deshalb kein
+Radio-Check-Paketformat abgeleitet werden.
+
+== Technischer Ausgangspunkt
+
+`MicroSubnetRouter` leitet private DMRD-Pakete bereits anhand der äußeren
+Quell- und Ziel-ID weiter. Der Inhalt eines CSBK wird noch nicht ausgewertet.
+
+Für die Analyse gilt ein DMRD-Burst nur dann als möglicher CSBK, wenn das
+Data-Sync-Bit `0x20` gesetzt ist und der Datentyp im Low-Nibble `0x03` lautet.
+Ein Voice-C-Burst kann ebenfalls das Low-Nibble `0x03` tragen, besitzt aber
+kein Data-Sync-Bit und darf nicht als CSBK gezählt werden.
+
+Die ETSI-Spezifikation beschreibt den Presence Check als `UU_V_Req` und die
+Antwort als `UU_Ans_Rsp`. Die Hardware-Aufnahme bleibt die Voraussetzung, weil
+erst sie zeigt, ob beide Geräte diesen Ablauf oder eine Herstellererweiterung
+verwenden.
+
+== Testaufbau
+
+[cols="2,2,3",options="header"]
+|===
+|Komponente |Testwert |Vor dem Lauf ergänzen
+
+|Master
+|Zone `100`, UDP-Port `62031`
+|IPv4-Adresse und Git-Commit
+
+|Hotspot
+|ID `1000001`, ein Homebrew/MMDVM-Hotspot
+|Modell, Software/Firmware, IPv4-Adresse und lokaler UDP-Port
+
+|AnyTone
+|DMR-ID `10001`, AT-D878UV II
+|Firmwarestand und Bezeichnung der Radio-Check-Funktion
+
+|Retevis
+|DMR-ID `10101`
+|genaues Modell, Firmwarestand und Bezeichnung der Radio-Check-Funktion
+|===
+
+Hotspot und Funkgeräte verwenden dieselbe Frequenz, denselben Color Code und
+den für den Simplex-Hotspot vorgesehenen Timeslot. Beide Funkgeräte besitzen
+private Kontakte für `10001` und `10101`.
+
+Der Test verwendet nur einen RF-Endpunkt. Der PCAP kann damit Paketformat und
+Rückleitung durch den Master belegen. Er trennt den Funkweg zwischen den beiden
+Geräten nicht vollständig, weil sie sich auf derselben Frequenz auch direkt
+hören können.
+
+== Aufzeichnung vorbereiten
+
+. Sicherstellen, dass keine ältere DMRoute-ng-Instanz auf Port `62031` läuft.
+. Master im Projektverzeichnis starten und Ausgabe aufzeichnen:
+
+[source,shell]
+----
+MQTT__Host=<BROKER_IP> MQTT__Port=1883 ZoneId=100 ZonePsk=<ZONE_PSK> make run 2>&1 | tee /tmp/dmroute-radio-check.log
+----
+
+. Auf dem Interface zum Hotspot parallel den UDP-Verkehr aufzeichnen:
+
+[source,shell]
+----
+sudo tcpdump -ni <NETZWERK_INTERFACE> -s 0 -w /tmp/dmroute-radio-check.pcap 'udp port 62031'
+----
+
+. Falls ein MQTT-Prüfempfänger verfügbar ist, dessen Ausgabe getrennt sichern:
+
+[source,shell]
+----
+mosquitto_sub -h <BROKER_IP> -p 1883 -v -t 'dmroute/100/#' | tee /tmp/dmroute-radio-check-mqtt.log
+----
+
+. Mit `10001` und danach mit `10101` jeweils einen kurzen TG-9-Ruf ohne
+  Sprache senden. Anschließend fünf Sekunden warten. Dadurch kennt der Router
+  die lokale Route von `10001` und den Gastpfad von `10101`, bevor der erste
+  Radio Check beginnt.
+. Für jedes Gerät Modell, Firmware, Menübezeichnung und aktuelle Uhrzeit
+  notieren.
+
+== Durchführung
+
+Zwischen zwei erfolgreichen Prüfungen mindestens 15 Sekunden warten. Bei einer
+unbeantworteten Prüfung warten, bis das anfragende Funkgerät das endgültige
+Ergebnis anzeigt, und danach weitere fünf Sekunden verstreichen lassen. Während
+eines Versuchs keine andere Funkaktion auslösen.
+
+[cols="1,2,2,2",options="header"]
+|===
+|Test |Anfragendes Gerät |Zielzustand |Wiederholungen
+
+|RC01
+|AnyTone `10001` prüft Retevis `10101`
+|Retevis eingeschaltet und empfangsbereit
+|drei vollständige Prüfungen
+
+|RC02
+|Retevis `10101` prüft AnyTone `10001`
+|AnyTone eingeschaltet und empfangsbereit
+|drei vollständige Prüfungen
+
+|RC03
+|AnyTone `10001` prüft Retevis `10101`
+|Retevis nach RC02 ausschalten
+|drei vollständige Prüfungen bis zum angezeigten Fehler
+
+|RC04
+|Retevis `10101` prüft AnyTone `10001`
+|Retevis wieder einschalten, kurzen TG-9-Ruf senden und danach AnyTone ausschalten
+|drei vollständige Prüfungen bis zum angezeigten Fehler
+|===
+
+Nach RC04 das AnyTone wieder einschalten. Für jeden einzelnen Versuch werden
+Startzeit, Endzeit, Anzeige des anfragenden Geräts und auffällige Signale am
+Zielgerät notiert:
+
+[cols="1,1,1,1,2",options="header"]
+|===
+|Test/Lauf |Startzeit |Endzeit |Anzeige |Beobachtung
+
+|RC01/1
+|___
+|___
+|___
+|___
+|===
+
+Die Tabellenzeile wird für alle zwölf Läufe fortgeführt.
+
+== Auswertung
+
+Die Auswertung ordnet DMRD-Datagramme zuerst nach IP-Richtung und anschließend
+nach äußerer Quell-ID, Ziel-ID, Data-Sync-Bit und Datentyp. Für mögliche CSBKs
+werden die 196 BPTC-Bits dekodiert und der CSBK-CRC geprüft.
+
+Für jede unterschiedliche PDU werden mindestens folgende Werte festgehalten:
+
+* Gerät und Laufrichtung,
+* äußere DMRD-Quell- und Ziel-ID,
+* Timeslot, Color Code und Unit-Call-Kennzeichnung,
+* CSBK-Opcode, Feature-ID und Antwortcode,
+* innere Quell- und Zieladresse,
+* vollständige dekodierte PDU einschließlich CRC,
+* Zeitabstand zur vorherigen passenden PDU,
+* IP-Richtung Hotspot zum Master oder Master zum Hotspot.
+
+Ein Radio-Check-Vorgang beginnt mit der ersten passenden Anfrage vom Hotspot
+zum Master. Weitere inhaltlich passende Anfragen desselben Anfragers an dasselbe
+Ziel zählen bis zur Antwort oder zum Timeout als Funkwiederholungen:
+
+[source,text]
+----
+attempts = Anzahl der eingehenden Radio-Check-Anfragen
+retries  = max(0, attempts - 1)
+duration = erste Anfrage bis Antwort oder bestätigtem Timeout
+----
+
+Das vom Master zum Hotspot zurückgesendete Datagramm und identische Pakete, die
+der Mitschnitt in beiden IP-Richtungen enthält, erhöhen `attempts` und `retries`
+nicht. CSBK-Preambles und andere Steuer-PDUs werden ebenfalls getrennt erfasst.
+
+Nach der Analyse muss für beide Hersteller eindeutig feststehen:
+
+* welches PDU-Muster eine Anfrage und welches eine Antwort bezeichnet,
+* ob beide Geräte auf die Anfrage des jeweils anderen Herstellers antworten,
+* wie viele Übertragungen ein erfolgreicher Vorgang benötigt,
+* in welchem Abstand das Gerät unbeantwortete Anfragen wiederholt,
+* wann das Gerät den Vorgang als fehlgeschlagen beendet.
+
+== Ergebnisübergabe
+
+Nach dem letzten Lauf zuerst `tcpdump`, danach MQTT-Abonnement und Master
+beenden. Benötigt werden:
+
+* `/tmp/dmroute-radio-check.pcap`,
+* `/tmp/dmroute-radio-check.log`,
+* falls vorhanden `/tmp/dmroute-radio-check-mqtt.log`,
+* die ausgefüllten Laufnotizen sowie Geräte- und Firmwareangaben.
+
+Rohmitschnitte und vollständige Logs werden nicht eingecheckt. Nach der Prüfung
+werden nur die für Parser- und Routingtests erforderlichen DMRD-Hex-Fixtures und
+eine abstrahierte Ergebnistabelle ohne weitere Funkinhalte versioniert.
+
+== Abnahmekriterien für die Capture-Phase
+
+Die Capture-Phase ist abgeschlossen, wenn:
+
+* je drei erfolgreiche und drei unbeantwortete Prüfungen pro Richtung eindeutig
+  im PCAP abgegrenzt sind,
+* Anfrage, Antwort, echte Funkwiederholung und Master-Rückleitung unterscheidbar
+  sind,
+* Paketfelder, CRC-Verhalten, Wiederholungsabstände und Timeout pro Hersteller
+  dokumentiert sind,
+* die gezählten `attempts` und `retries` mit Zeitfolge und Geräteanzeige
+  übereinstimmen,
+* Issue #9 anschließend ohne vermutete Paketfelder implementierbare
+  Abnahmekriterien enthält.

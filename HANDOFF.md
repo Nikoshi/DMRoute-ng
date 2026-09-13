@@ -1,18 +1,24 @@
 # DMRoute-ng handoff
 
-## Active work: roadmap prioritization after #11
+## Active work: Radio Check capture preparation for #9
 
-- PR #19 was merged into `main` as `f34a953`; `TODO.md` now contains every open roadmap issue.
-- Work is on `docs/prioritize-roadmap`, created from the updated `main`.
-- The next phase prioritizes radio features: #9 first, followed by #10 and the semantic emulator scenarios in #15.
-- AnyTone and Retevis hardware are available for the bidirectional Radio Check captures required by #9.
+- PR #20 was merged into `main` as `acc4860` and established #9 as the next work package.
+- Work is on `feat/issue-9-radio-check`, created from the updated `origin/main`.
+- The German bidirectional AnyTone/Retevis capture procedure is prepared; the physical run is the next gate.
+- Follow-up issue #21 tracks master-initiated Radio Checks and later roaming expiry integration.
 
 ## Objective
 
-Record the agreed roadmap order and prepare issue #9 as the next planning and capture work package.
+Capture successful and unanswered Radio Checks from both radio families, derive the verified CSBK format and timings, and turn #9 into an implementation-ready contract.
 
 ## Decisions
 
+- The first #9 implementation will passively recognize and route Radio Check requests and responses. Master-originated checks are deferred to #21.
+- MQTT and source-generated logs will represent one logical transaction with `Requested`, then exactly one `Answered` or `TimedOut` result.
+- Terminal results will expose `attempts`, `retries = attempts - 1`, and duration so operators can spot links that need repeated RF transmissions.
+- Only matching request CSBKs received from the hotspot count as attempts. Master return traffic, capture duplicates, preambles and unrelated CSBKs do not increment retries.
+- One physical hotspot is sufficient for packet-format analysis and proves UDP return routing. It cannot isolate the RF path between two radios on the same frequency.
+- No production parser will be written from assumed fields. The AnyTone/Retevis online and offline captures are the implementation gate.
 - Issue #9 is the next work package because its bounded protocol scope can be captured with both available radio families and then automated with the #11 test harness.
 - Issue #10 follows #9 and delivers the larger outbound SDS encoder, API and delivery state model.
 - Issue #15 follows both protocol efforts and turns their verified packet flows into semantic emulator scenarios.
@@ -31,6 +37,10 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Current state
 
+- `docs/radio-check-capture-plan.adoc` defines setup, route priming, twelve recorded runs, observation fields, retry counting and evidence handling.
+- Existing captures contain voice, APRS and SDS traffic but no deliberately triggered Radio Check.
+- `MicroSubnetRouter` already routes private DMRD packets byte-for-byte. It does not decode CSBK content, and a low-nibble `0x03` without the data-sync bit is a Voice-C burst rather than CSBK.
+- Local raw capture formats and the `captures/` directory are excluded through `.gitignore`; evidence remains under `/tmp`.
 - Homebrew packet writers cover RPTL, RPTK, the complete 302-byte RPTC layout, RPTPING and RPTCL; response parsers cover RPTACK, MSTPONG and MSTNAK.
 - The emulator rejects non-IPv4 endpoints, invalid capacities/timeouts, non-ASCII Homebrew fields, mismatched radio IDs and DMRD frames for another hotspot.
 - Integration tests log in two concurrent hotspots on ephemeral loopback ports, persist RPTC metadata, exercise manual and periodic ping, forward a captured group-data frame byte-for-byte and prove that the source receives no echo.
@@ -107,4 +117,4 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Precise next step
 
-Review and merge the roadmap prioritization, then expand issue #9 with a bidirectional AnyTone/Retevis capture plan, protocol fields and acceptance criteria before implementation.
+Run `docs/radio-check-capture-plan.adoc` with the AnyTone and Retevis, then provide the three `/tmp/dmroute-radio-check*` artifacts and the twelve timestamped device results for protocol analysis.

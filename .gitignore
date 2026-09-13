@@ -35,3 +35,8 @@ Temporary Items
 # Standalone developer and test tools
 /tools/**/obj
 /tools/**/bin
+
+# Lokale Hardware- und Protokollmitschnitte
+/captures/
+*.pcap
+*.pcapng

@@ -11,31 +11,34 @@ dokumentiert.
 
 | Priorität | Thema | Status | Abhängigkeiten |
 |---:|---|---|---|
-| 1 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Nächstes Arbeitspaket; Hardware-Captures ausstehend | #11 erfüllt; AnyTone und Retevis verfügbar |
+| 1 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Capture-Plan erstellt; Hardware-Lauf als nächster Schritt | #11 erfüllt; AnyTone und Retevis verfügbar |
 | 2 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Danach ausarbeiten | #11 erfüllt; DMR-Datenencoder |
 | 3 | [#15 Semantische DMR-Szenarien im Emulator](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Nach den Protokollarbeiten | #11 erfüllt; #9 und #10 |
-| 4 | [#16 Testorchestrator für mehrere Master](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #11 erfüllt; nach #15 |
-| 5 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 erfüllt; stabile Szenario-API aus #15 |
-| 6 | [#17 Virtuelles Funkgerät kommuniziert mit echtem Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Planung erforderlich | #15; Hardware-/RF-Konzept offen |
+| 4 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Folgeticket; nach passiver Erkennung und Writer | #9 und #15 |
+| 5 | [#16 Testorchestrator für mehrere Master](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #11 erfüllt; nach #15 |
+| 6 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 erfüllt; stabile Szenario-API aus #15 |
+| 7 | [#17 Virtuelles Funkgerät kommuniziert mit echtem Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Planung erforderlich | #15; Hardware-/RF-Konzept offen |
 
 ## 1. Check Device (#9)
 
 ### Ziel
 
-Der Master soll Radio-Check-Anfragen korrekt erkennen und beantworten können.
-Aktives Prüfen eines Teilnehmers vor Ablauf eines Roaming-Eintrags wird erst nach
-Klärung des grundlegenden Protokollablaufs bewertet.
+Der Master soll Radio-Check-Anfragen und -Antworten korrekt erkennen,
+unverändert routen und den zusammengefassten Vorgang in Log und MQTT melden.
+Das Ergebnis enthält die Anzahl der Versuche und Funkwiederholungen sowie die
+Dauer. Aktives Prüfen durch den Master ist in #21 ausgegliedert.
 
 ### Nächster Schritt
 
-- Einen reproduzierbaren Capture-Plan für AnyTone und Retevis in beiden
-  Nachrichtenrichtungen erstellen.
-- Radio Checks mit AnyTone und Retevis in beide Richtungen mitschneiden.
+- Den deutschen
+  [Radio-Check-Capture-Plan](docs/radio-check-capture-plan.adoc) mit je drei
+  erfolgreichen und unbeantworteten Prüfungen pro Richtung durchführen.
 - CSBK-/DMRD-Felder, Quell- und Zieladressierung, Antwortpakete, Wiederholungen
   und Timeouts dokumentieren.
-- Prüfen, welcher Anteil bereits transparent durch `MicroSubnetRouter` geroutet
-  wird und welche semantische Verarbeitung fehlt.
-- Danach Issue #9 mit eindeutigem Verhalten und Hardware-Abnahmetest ergänzen.
+- Echte Funkwiederholungen von Master-Rückleitungen unterscheiden und daraus
+  `attempts`, `retries` und die Vorgangsdauer bestimmen.
+- Danach Issue #9 um die bestätigten Paketfelder und Implementierungsabnahme
+  ergänzen und den WIP-Status entfernen.
 
 ### Randbedingungen
 
@@ -92,7 +95,22 @@ und SDS aus semantischen Eingaben erzeugen können, statt nur Captures abzuspiel
 - Eine serverunabhängige Projektgrenze für gemeinsam nutzbare Protokollbausteine
   festlegen.
 
-## 4. Testorchestrator für mehrere Master (#16)
+## 4. Masterinitiierter Radio Check (#21)
+
+### Ziel
+
+Der Master soll einen Radio Check selbst auslösen und Antwort, Timeout,
+Wiederholungszahl und Dauer für interne Abläufe bereitstellen. Ein späterer
+Anwendungsfall ist die Erreichbarkeitsprüfung vor Ablauf eines Roaming-Eintrags.
+
+### Nächster Schritt
+
+- Nach #9 und #15 Identität des Masters, internen beziehungsweise externen
+  Auslöser, begrenzten Versandzustand und Rate-Limit festlegen.
+- Verhalten für lokale Teilnehmer, Gäste und über Mesh bekannte Teilnehmer
+  spezifizieren.
+
+## 5. Testorchestrator für mehrere Master (#16)
 
 ### Ziel
 
@@ -111,7 +129,7 @@ miteinander verbinden und gemeinsam mit den Teilnehmern aus #11 steuern können.
 - Die virtuellen Hotspots und Funkgeräte aus #11 bilden die Teilnehmerseite der
   späteren Mehrmaster-Szenarien.
 
-## 5. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
+## 6. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
 
 ### Ziel
 
@@ -125,7 +143,7 @@ vorhandene Szenarien ab, ohne den Emulator an den Server zu koppeln.
   PSK-Behandlung, Ausgabeformat und Abnahmekriterien im Issue festlegen.
 - Entscheiden, ob zuerst eine skriptbare CLI oder direkt eine TUI entsteht.
 
-## 6. Virtuelles Funkgerät kommuniziert mit echtem Funkgerät (#17)
+## 7. Virtuelles Funkgerät kommuniziert mit echtem Funkgerät (#17)
 
 ### Ziel
 
