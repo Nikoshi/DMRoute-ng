@@ -11,12 +11,12 @@ dokumentiert.
 
 | Priorität | Thema | Status | Abhängigkeiten |
 |---:|---|---|---|
-| 1 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Protokollanalyse erforderlich | Hardware-Captures; Testharness aus #11 verfügbar |
-| 2 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Schnittstelle und Protokollablauf offen | #11 erfüllt; DMR-Datenencoder |
-| 3 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 erfüllt |
-| 4 | [#15 Semantische DMR-Szenarien im Emulator](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Protokollanalyse erforderlich | #11 erfüllt; #9 und #10 |
-| 5 | [#16 Testorchestrator für mehrere Master](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #11 erfüllt |
-| 6 | [#17 Virtuelles Funkgerät kommuniziert mit echtem Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Planung erforderlich | #11 erfüllt; weitere Abhängigkeiten offen |
+| 1 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Nächstes Arbeitspaket; Hardware-Captures ausstehend | #11 erfüllt; AnyTone und Retevis verfügbar |
+| 2 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Danach ausarbeiten | #11 erfüllt; DMR-Datenencoder |
+| 3 | [#15 Semantische DMR-Szenarien im Emulator](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Nach den Protokollarbeiten | #11 erfüllt; #9 und #10 |
+| 4 | [#16 Testorchestrator für mehrere Master](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #11 erfüllt; nach #15 |
+| 5 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 erfüllt; stabile Szenario-API aus #15 |
+| 6 | [#17 Virtuelles Funkgerät kommuniziert mit echtem Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Planung erforderlich | #15; Hardware-/RF-Konzept offen |
 
 ## 1. Check Device (#9)
 
@@ -28,6 +28,8 @@ Klärung des grundlegenden Protokollablaufs bewertet.
 
 ### Nächster Schritt
 
+- Einen reproduzierbaren Capture-Plan für AnyTone und Retevis in beiden
+  Nachrichtenrichtungen erstellen.
 - Radio Checks mit AnyTone und Retevis in beide Richtungen mitschneiden.
 - CSBK-/DMRD-Felder, Quell- und Zieladressierung, Antwortpakete, Wiederholungen
   und Timeouts dokumentieren.
@@ -76,21 +78,7 @@ Rückmeldung, Betriebsaufwand und NativeAOT-Unterstützung.
 - Writer erhalten Zielpuffer vom Aufrufer; variable Paketarrays, Reflection und
   dynamische Codeerzeugung sind im produktiven Pfad ausgeschlossen.
 
-## 3. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
-
-### Ziel
-
-Die programmatische API aus #11 soll später interaktiv bedient werden können.
-Das Frontend konfiguriert Verbindungen, zeigt den Sitzungszustand und spielt
-vorhandene Szenarien ab, ohne den Emulator an den Server zu koppeln.
-
-### Nächster Schritt
-
-- Bedienmodell, sichere PSK-Behandlung, Ausgabeformat und Abnahmekriterien im
-  Issue festlegen.
-- Entscheiden, ob zuerst eine skriptbare CLI oder direkt eine TUI entsteht.
-
-## 4. Semantische DMR-Szenarien im Emulator (#15)
+## 3. Semantische DMR-Szenarien im Emulator (#15)
 
 ### Ziel
 
@@ -104,7 +92,7 @@ und SDS aus semantischen Eingaben erzeugen können, statt nur Captures abzuspiel
 - Eine serverunabhängige Projektgrenze für gemeinsam nutzbare Protokollbausteine
   festlegen.
 
-## 5. Testorchestrator für mehrere Master (#16)
+## 4. Testorchestrator für mehrere Master (#16)
 
 ### Ziel
 
@@ -123,6 +111,20 @@ miteinander verbinden und gemeinsam mit den Teilnehmern aus #11 steuern können.
 - Die virtuellen Hotspots und Funkgeräte aus #11 bilden die Teilnehmerseite der
   späteren Mehrmaster-Szenarien.
 
+## 5. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
+
+### Ziel
+
+Die programmatische API aus #11 soll später interaktiv bedient werden können.
+Das Frontend konfiguriert Verbindungen, zeigt den Sitzungszustand und spielt
+vorhandene Szenarien ab, ohne den Emulator an den Server zu koppeln.
+
+### Nächster Schritt
+
+- Nach Stabilisierung der semantischen Szenario-API Bedienmodell, sichere
+  PSK-Behandlung, Ausgabeformat und Abnahmekriterien im Issue festlegen.
+- Entscheiden, ob zuerst eine skriptbare CLI oder direkt eine TUI entsteht.
+
 ## 6. Virtuelles Funkgerät kommuniziert mit echtem Funkgerät (#17)
 
 ### Ziel
@@ -139,8 +141,8 @@ ermöglichen, beispielsweise den Versand einer SDS an das reale Gerät.
 
 ### Randbedingungen
 
-- #11 stellt nur die bestätigte technische Grundlage bereit; weitere
-  Abhängigkeiten werden erst bei der Ausarbeitung festgelegt.
+- #11 stellt die bestätigte Transportgrundlage bereit; die semantische
+  Szenario-API aus #15 wird für die Funkaktionen benötigt.
 - Vor einer Implementierung ist ein Hardware- und Protokollkonzept erforderlich.
 
 ## Spätere Hardware-Validierung

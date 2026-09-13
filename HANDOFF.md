@@ -1,21 +1,22 @@
 # DMRoute-ng handoff
 
-## Active work: roadmap synchronization after #11
+## Active work: roadmap prioritization after #11
 
-- PR #18 was merged into `main` as `b849ae0`; GitHub issue #11 was closed automatically.
-- Work is on `docs/sync-roadmap-after-issue-11` in PR #19, created from the updated `main`.
-- Open roadmap issues are #9, #10, and #14 through #17. Issues #16 and #17 were added after the #11 implementation and are now represented in `TODO.md`.
-- Their relative order is intentionally unchanged until the next joint prioritization.
+- PR #19 was merged into `main` as `f34a953`; `TODO.md` now contains every open roadmap issue.
+- Work is on `docs/prioritize-roadmap`, created from the updated `main`.
+- The next phase prioritizes radio features: #9 first, followed by #10 and the semantic emulator scenarios in #15.
+- AnyTone and Retevis hardware are available for the bidirectional Radio Check captures required by #9.
 
 ## Objective
 
-Keep `TODO.md`, GitHub issues and this handoff consistent after the merge of #11, then choose the next work package explicitly.
+Record the agreed roadmap order and prepare issue #9 as the next planning and capture work package.
 
 ## Decisions
 
-- Issue #11 is complete and moves out of the active roadmap. PR #18 and merge commit `b849ae0` remain recorded under completed work.
-- Issues #16 and #17 are appended after the previously ordered work. No new priority is inferred from their creation time.
-- Only confirmed dependencies are recorded for #17; its hardware boundary and further dependencies remain part of its planning work.
+- Issue #9 is the next work package because its bounded protocol scope can be captured with both available radio families and then automated with the #11 test harness.
+- Issue #10 follows #9 and delivers the larger outbound SDS encoder, API and delivery state model.
+- Issue #15 follows both protocol efforts and turns their verified packet flows into semantic emulator scenarios.
+- Issue #16 follows #15 so multi-master tests can use the mature scenario API. Issue #14 follows after that API stabilizes; hardware-coupled #17 remains last.
 - `tools/DMRoute_ng.Emulator` is a .NET 9 core library with no reference to the DMRoute-ng server assembly or xUnit. A later CLI/TUI will consume its public API.
 - `VirtualHotspot` owns the UDP session and models login, configuration, keepalive, disconnect, bounded DMRD capture and explicit protocol states. `VirtualRadio` replays owned `RadioScenario` frames with relative timing.
 - The first version replays sanitized captured DMRD frames. Semantic voice, CSBK and SDS generation is deferred to #15.
@@ -106,4 +107,4 @@ Keep `TODO.md`, GitHub issues and this handoff consistent after the merge of #11
 
 ## Precise next step
 
-Review and merge PR #19, then jointly reprioritize issues #9, #10 and #14 through #17 before starting another implementation branch.
+Review and merge the roadmap prioritization, then expand issue #9 with a bidirectional AnyTone/Retevis capture plan, protocol fields and acceptance criteria before implementation.
