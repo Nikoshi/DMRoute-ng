@@ -29,6 +29,58 @@ public static class DmrTrellis
         else p[i >> 3] &= (byte)~BitMaskTable[i & 7];
     }
 
+    public static void Encode(ReadOnlySpan<byte> payload, Span<byte> data)
+    {
+        if (payload.Length < 18) throw new ArgumentException("Payload must contain 18 bytes.", nameof(payload));
+        if (data.Length < 33) throw new ArgumentException("Output must contain 33 bytes.", nameof(data));
+
+        Span<byte> tribits = stackalloc byte[49];
+        for (var i = 0; i < 48; i++)
+        {
+            var bit = i * 3;
+            tribits[i] = (byte)((ReadBit(payload, bit) ? 4 : 0) |
+                                (ReadBit(payload, bit + 1) ? 2 : 0) |
+                                (ReadBit(payload, bit + 2) ? 1 : 0));
+        }
+        tribits[48] = 0;
+
+        Span<byte> points = stackalloc byte[49];
+        byte state = 0;
+        for (var i = 0; i < points.Length; i++)
+        {
+            state = tribits[i];
+            points[i] = EncodeTable[(i == 0 ? 0 : tribits[i - 1]) * 8 + state];
+        }
+
+        Span<sbyte> dibits = stackalloc sbyte[98];
+        for (var i = 0; i < points.Length; i++)
+        {
+            (dibits[i * 2], dibits[i * 2 + 1]) = PointToDibits(points[i]);
+        }
+
+        data.Clear();
+        for (var i = 0; i < 98; i++)
+        {
+            var dibit = dibits[(int)InterleaveTable[i]];
+            var first = dibit is -1 or -3;
+            var second = dibit is 3 or -3;
+            var position = i * 2;
+            if (position >= 98) position += 68;
+            WriteBit(data, position, first);
+            position = i * 2 + 1;
+            if (position >= 98) position += 68;
+            WriteBit(data, position, second);
+        }
+    }
+
+    private static (sbyte First, sbyte Second) PointToDibits(byte point) => point switch
+    {
+        0 => (1, -1), 1 => (-1, -1), 2 => (3, -3), 3 => (-3, -3),
+        4 => (-3, -1), 5 => (3, -1), 6 => (-1, -3), 7 => (1, -3),
+        8 => (-3, 3), 9 => (3, 3), 10 => (-1, 1), 11 => (1, 1),
+        12 => (1, 3), 13 => (-1, 3), 14 => (3, 1), _ => (-3, 1)
+    };
+
     public static bool Decode(ReadOnlySpan<byte> data, Span<byte> payload)
     {
         Span<sbyte> dibits = stackalloc sbyte[98];

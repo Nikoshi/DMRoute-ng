@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using DMRoute_ng.Core;
 using DMRoute_ng.Registry;
+using DMRoute_ng.Services;
 using DMRoute_ng.Types;
 using Microsoft.Extensions.Logging;
 
@@ -92,6 +93,8 @@ public sealed partial class MicroSubnetRouter : IDisposable
     private readonly Timer _cleanupTimer;
     private long _droppedLocalRouteStates;
     private long _droppedCallStates;
+    private long _droppedReservedSources;
+    private long _consumedServiceFrames;
 
     public event DmrDataFrameHandler? OnDataFrameReceived;
     public event DmrCallEventHandler? OnCallEvent;
@@ -99,6 +102,8 @@ public sealed partial class MicroSubnetRouter : IDisposable
 
     public long DroppedLocalRouteStates => Interlocked.Read(ref _droppedLocalRouteStates);
     public long DroppedCallStates => Interlocked.Read(ref _droppedCallStates);
+    public long DroppedReservedSources => Interlocked.Read(ref _droppedReservedSources);
+    public long ConsumedServiceFrames => Interlocked.Read(ref _consumedServiceFrames);
     public int MaxActiveCalls => _maxActiveCalls;
 
     public int ActiveCallCount
@@ -162,6 +167,19 @@ public sealed partial class MicroSubnetRouter : IDisposable
                            && masterPeer.DataEndPoint == remoteEndPoint;
         }
         if (!isLocalOrigin && !isMeshOrigin) return;
+
+        if (DmrServiceIds.IsReserved(srcId))
+        {
+            Interlocked.Increment(ref _droppedReservedSources);
+            return;
+        }
+
+        if (DmrServiceIds.IsReserved(dstId))
+        {
+            Interlocked.Increment(ref _consumedServiceFrames);
+            if (isDataFrame) OnDataFrameReceived?.Invoke(packet);
+            return;
+        }
 
         if (isLocalOrigin)
         {

@@ -1,20 +1,24 @@
 # DMRoute-ng handoff
 
-## Active work: roadmap prioritization after #11
+## Active work: confirmed SDS echo service for issue #10
 
-- PR #19 was merged into `main` as `f34a953`; `TODO.md` now contains every open roadmap issue.
-- Work is on `docs/prioritize-roadmap`, created from the updated `main`.
-- The next phase prioritizes radio features: #9 first, followed by #10 and the semantic emulator scenarios in #15.
-- AnyTone and Retevis hardware are available for the bidirectional Radio Check captures required by #9.
+- Work is on `feat/issue-10-sds-echo`, based on `origin/main` at `acc4860`.
+- The branch contains the confirmed outbound SDS transport and an internal echo service as the first hardware-testable slice of issue #10.
+- The general external API and its delivery result contract are not implemented yet.
+- Radio Check findings remain isolated on `feat/issue-9-radio-check` at `fc4e955`; they must not be merged implicitly into this branch.
 
 ## Objective
 
-Record the agreed roadmap order and prepare issue #9 as the next planning and capture work package.
+Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate the echo transaction against real radio hardware before defining the general external API.
 
 ## Decisions
 
-- Issue #9 is the next work package because its bounded protocol scope can be captured with both available radio families and then automated with the #11 test harness.
-- Issue #10 follows #9 and delivers the larger outbound SDS encoder, API and delivery state model.
+- Issue #10 starts with an internal echo service on reserved destination ID `990099`; this exercises the complete confirmed outbound transport without prematurely choosing the external API.
+- DMR destination IDs `990000` through `999999` are reserved for local services. Frames to these IDs are consumed locally and frames claiming a reserved source ID are rejected.
+- The echo command is a group UTF-16LE SDS beginning with `ECHO`; the reply is a private confirmed SDS to the requesting five-digit radio ID.
+- Echo requests are copied into bounded, preallocated slots, duplicate-suppressed for 30 seconds, processed sequentially, and retried up to three times while awaiting ACK/NAK.
+- `Services:Echo:Enabled` controls the service and defaults to enabled.
+- Issue #9 remains deferred on its separate branch until a second RF endpoint can capture the target response without the single-simplex-hotspot collision observed previously.
 - Issue #15 follows both protocol efforts and turns their verified packet flows into semantic emulator scenarios.
 - Issue #16 follows #15 so multi-master tests can use the mature scenario API. Issue #14 follows after that API stabilizes; hardware-coupled #17 remains last.
 - `tools/DMRoute_ng.Emulator` is a .NET 9 core library with no reference to the DMRoute-ng server assembly or xUnit. A later CLI/TUI will consume its public API.
@@ -31,6 +35,11 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Current state
 
+- Added caller-owned writers for TMS/UDP/IP payloads, DMR CRCs, BPTC(196,96), rate-3/4 trellis bursts, confirmed data headers, response headers, CSBK preambles and complete DMRD packets.
+- `SdsGateway` now publishes a borrowed-span `SdsMessageEvent` with source, destination, hotspot, group/private marker, encoding and receive timing. MQTT copies text into bounded slots and decodes it only on its background publisher.
+- `SdsServiceRegistry` dispatches reserved destinations to `ISdsService` implementations; `SdsEchoService` sends confirmed replies and consumes matching acknowledgements.
+- Dependency injection exposes `DmrServer` as `IDmrSender`, starts the echo background service and constructs the service registry during application startup.
+- Reserved-service classification remains allocation-free after warm-up and prevents service traffic from being routed or learned as ordinary subscriber traffic.
 - Homebrew packet writers cover RPTL, RPTK, the complete 302-byte RPTC layout, RPTPING and RPTCL; response parsers cover RPTACK, MSTPONG and MSTNAK.
 - The emulator rejects non-IPv4 endpoints, invalid capacities/timeouts, non-ASCII Homebrew fields, mismatched radio IDs and DMRD frames for another hotspot.
 - Integration tests log in two concurrent hotspots on ephemeral loopback ports, persist RPTC metadata, exercise manual and periodic ping, forward a captured group-data frame byte-for-byte and prove that the source receives no echo.
@@ -63,7 +72,9 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 ## Validation
 
 - Release build succeeds with 0 warnings and 0 errors.
-- `make test` passes 68/68 tests in Release mode.
+- `make test` passes 75/75 tests in Release mode.
+- Codec tests reproduce captured UTF-16LE TMS datagrams, BPTC/trellis bursts and confirmed-message CRCs byte-for-byte.
+- Service tests cover local consumption, reserved-source rejection, duplicate suppression, private confirmed reply delivery with ACK, and zero-allocation warmed classification.
 - Warmed allocation tests report 0 bytes for group routing, known ping, unknown DMRD/ping, new state within reserved capacity, a full call table and SDS header ingestion.
 - UDP `SocketAddress` round-trip and real loopback send tests pass.
 - MQTT fragmented-CONNACK and publish-wire-format integration test passes.
@@ -78,6 +89,8 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Hardware validation
 
+- Two hotspots and four radios are now available in Switzerland. One hotspot currently needs its loosened antenna connector resoldered; the other can be used for the first echo-service validation.
+- Once the connector is repaired, the two independent RF endpoints can resume the deferred Radio Check captures from `feat/issue-9-radio-check`.
 - Added `docs/hardware-test-plan.adoc` for a Zone 100 smoke test with radios `10001` (local), `10101` (guest), and one Homebrew/MMDVM hotspot.
 - The plan covers login/authentication, RPTC, ping/pong, group and private calls, guest tracking, disconnect/reconnect, and bidirectional SDS/SMS.
 - The real hardware run from 2026-09-12 is documented in `docs/hardware-test-results-2026-09-12.adoc`. Login/keepalive, local and guest group calls, private routing in both directions, MQTT events, timeout/reconnect, and confirmed SDS `10001 -> 10101` passed.
@@ -95,6 +108,8 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Known limits
 
+- The current issue-#10 slice exposes only the radio-facing echo service. It has no general HTTP, MQTT or command-line send API and no external delivery-state contract.
+- Echo replies are serialized through one background worker; parallel outbound confirmed-SDS transactions are intentionally deferred until the general delivery model is specified.
 - The emulator currently has only a programmatic API and recorded-frame replay; interactive use and semantic frame generation are tracked in #14 and #15.
 - UDP is intentionally IPv4-only, matching the server. Emulator receive queues are bounded and fail visibly on overflow.
 - Completed SMS strings and MQTT connection work may allocate by design.
@@ -107,4 +122,4 @@ Record the agreed roadmap order and prepare issue #9 as the next planning and ca
 
 ## Precise next step
 
-Review and merge the roadmap prioritization, then expand issue #9 with a bidirectional AnyTone/Retevis capture plan, protocol fields and acceptance criteria before implementation.
+Run a real `ECHO` transaction through the working hotspot and capture request, outbound reply, radio ACK and retry timing. After the second hotspot antenna connector is repaired, resume the separate issue-#9 Radio Check capture plan with independent RF endpoints.

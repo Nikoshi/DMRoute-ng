@@ -118,6 +118,7 @@ public sealed class ConfigurationTests
         Assert.Equal(original, copy);
         Assert.Contains("\"Routing\"", json);
         Assert.Contains("\"Sds\"", json);
+        Assert.Contains("\"Services\"", json);
         Assert.Contains("\"Mqtt\"", json);
     }
 

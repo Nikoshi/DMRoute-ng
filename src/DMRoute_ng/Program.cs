@@ -5,6 +5,7 @@ using DMRoute_ng.Gateways;
 using DMRoute_ng.Integration;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -40,6 +41,7 @@ internal static class DmRouteApplication
 
             using var host = builder.Build();
             host.Services.GetRequiredService<SdsGateway>();
+            host.Services.GetRequiredService<SdsServiceRegistry>();
             host.Run();
             return 0;
         }
@@ -106,12 +108,19 @@ internal static class DmRouteApplication
             settings.Routing.MaxActiveCalls,
             settings.Routing.MaxLocalDeviceRoutes));
 
-        builder.Services.AddHostedService<DmrServer>();
+        builder.Services.AddSingleton<DmrServer>();
+        builder.Services.AddSingleton<IDmrSender>(sp => sp.GetRequiredService<DmrServer>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<DmrServer>());
         builder.Services.AddSingleton<SdsGateway>(sp => new SdsGateway(
             sp.GetRequiredService<ILogger<SdsGateway>>(),
             sp.GetRequiredService<MicroSubnetRouter>(),
             settings.Sds.MaxSessions,
             settings.Sds.MaxMessageBytes));
+
+        builder.Services.AddSingleton<SdsEchoService>();
+        builder.Services.AddSingleton<ISdsService>(sp => sp.GetRequiredService<SdsEchoService>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<SdsEchoService>());
+        builder.Services.AddSingleton<SdsServiceRegistry>();
 
         builder.Services.AddSingleton<RawMqttClient>(_ =>
         {

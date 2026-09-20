@@ -14,6 +14,7 @@ public sealed record DmRouteSettings
     public string MeshPsk { get; init; } = DefaultMeshPsk;
     public RoutingSettings Routing { get; init; } = new();
     public SdsSettings Sds { get; init; } = new();
+    public ServicesSettings Services { get; init; } = new();
     public MqttSettings Mqtt { get; init; } = new();
 
     public static DmRouteSettings FromConfiguration(IConfiguration configuration)
@@ -41,6 +42,13 @@ public sealed record DmRouteSettings
             {
                 MaxSessions = ReadInt(configuration, "Sds:MaxSessions", 128),
                 MaxMessageBytes = ReadInt(configuration, "Sds:MaxMessageBytes", 4096)
+            },
+            Services = new ServicesSettings
+            {
+                Echo = new EchoServiceSettings
+                {
+                    Enabled = ReadBool(configuration, "Services:Echo:Enabled", true)
+                }
             },
             Mqtt = new MqttSettings
             {
@@ -136,6 +144,16 @@ public sealed record SdsSettings
 {
     public int MaxSessions { get; init; } = 128;
     public int MaxMessageBytes { get; init; } = 4096;
+}
+
+public sealed record ServicesSettings
+{
+    public EchoServiceSettings Echo { get; init; } = new();
+}
+
+public sealed record EchoServiceSettings
+{
+    public bool Enabled { get; init; } = true;
 }
 
 public sealed record MqttSettings

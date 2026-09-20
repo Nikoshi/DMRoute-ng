@@ -20,6 +20,7 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         MqttPort,
         LocationPrivacyEnabled,
         LocationGridKm,
+        EchoEnabled,
         MaxActiveCalls,
         MaxLocalDeviceRoutes,
         MaxSdsSessions,
@@ -53,7 +54,8 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.EventCapacity,
         Field.DiagnosticFrameCapacity,
         Field.MaxDiagnosticFrameBytes,
-        Field.PayloadBufferBytes
+        Field.PayloadBufferBytes,
+        Field.EchoEnabled
     ];
 
     public SetupResult Run(string path, DmRouteSettings initialSettings)
@@ -96,7 +98,18 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
                 case ConsoleKey.S:
                     if (TrySave(path, settings, out status)) return SetupResult.Saved;
                     break;
-                case ConsoleKey.Spacebar when fields[selected] == Field.LocationPrivacyEnabled:
+                case ConsoleKey.Spacebar when fields[selected] is Field.LocationPrivacyEnabled or Field.EchoEnabled:
+                    if (fields[selected] == Field.EchoEnabled)
+                    {
+                        settings = settings with
+                        {
+                            Services = settings.Services with
+                            {
+                                Echo = settings.Services.Echo with { Enabled = !settings.Services.Echo.Enabled }
+                            }
+                        };
+                        break;
+                    }
                     settings = settings with
                     {
                         Mqtt = settings.Mqtt with
@@ -138,9 +151,17 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
 
     private DmRouteSettings Edit(DmRouteSettings settings, Field field, out string status)
     {
-        if (field == Field.LocationPrivacyEnabled)
+        if (field is Field.LocationPrivacyEnabled or Field.EchoEnabled)
         {
             status = string.Empty;
+            if (field == Field.EchoEnabled)
+                return settings with
+                {
+                    Services = settings.Services with
+                    {
+                        Echo = settings.Services.Echo with { Enabled = !settings.Services.Echo.Enabled }
+                    }
+                };
             return settings with
             {
                 Mqtt = settings.Mqtt with
@@ -222,6 +243,7 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.MqttPort => "MQTT port",
         Field.LocationPrivacyEnabled => "Location privacy",
         Field.LocationGridKm => "Location grid (km)",
+        Field.EchoEnabled => "SDS echo service",
         Field.MaxActiveCalls => "Max active calls",
         Field.MaxLocalDeviceRoutes => "Max local device routes",
         Field.MaxSdsSessions => "Max SDS sessions",
@@ -238,6 +260,7 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
     {
         Field.ZonePsk or Field.MeshPsk => "********",
         Field.LocationPrivacyEnabled => settings.Mqtt.LocationPrivacyEnabled ? "[*] enabled" : "[ ] disabled",
+        Field.EchoEnabled => settings.Services.Echo.Enabled ? "[*] enabled" : "[ ] disabled",
         _ => CurrentValue(settings, field)
     };
 
@@ -250,6 +273,7 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.MqttPort => settings.Mqtt.Port.ToString(CultureInfo.InvariantCulture),
         Field.LocationPrivacyEnabled => settings.Mqtt.LocationPrivacyEnabled.ToString(CultureInfo.InvariantCulture),
         Field.LocationGridKm => settings.Mqtt.LocationGridKm.ToString(CultureInfo.InvariantCulture),
+        Field.EchoEnabled => settings.Services.Echo.Enabled.ToString(CultureInfo.InvariantCulture),
         Field.MaxActiveCalls => settings.Routing.MaxActiveCalls.ToString(CultureInfo.InvariantCulture),
         Field.MaxLocalDeviceRoutes => settings.Routing.MaxLocalDeviceRoutes.ToString(CultureInfo.InvariantCulture),
         Field.MaxSdsSessions => settings.Sds.MaxSessions.ToString(CultureInfo.InvariantCulture),

@@ -98,15 +98,19 @@ public sealed class HomebrewEmulatorTests
         Assert.Equal(RepeaterState.LoggedIn, sourceRepeater.State);
         Assert.Equal("DMRTEST", sourceRepeater.Configuration?.Callsign);
 
+        var routedFrame = CapturedGroupDataFrame.ToArray();
+        routedFrame[8] = 0;
+        routedFrame[9] = 0;
+        routedFrame[10] = 9;
         var scenario = new RadioScenario(
             "captured fixed-position group data",
             10001,
-            [new RadioScenarioStep(CapturedGroupDataFrame, TimeSpan.Zero)]);
+            [new RadioScenarioStep(routedFrame, TimeSpan.Zero)]);
         var radio = new VirtualRadio(10001);
         await radio.ReplayAsync(source, scenario, timeout.Token);
 
         var forwarded = await target.ReceiveDmrdAsync(timeout.Token);
-        Assert.Equal(CapturedGroupDataFrame, forwarded.Payload);
+        Assert.Equal(routedFrame, forwarded.Payload);
         await Assert.ThrowsAsync<HomebrewTimeoutException>(
             () => source.ReceiveDmrdAsync(TimeSpan.FromMilliseconds(150), timeout.Token));
     }
