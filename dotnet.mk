@@ -1,4 +1,4 @@
-.PHONY: help run test add rm list restore clean distclean edit docker docker.tar
+.PHONY: help run test add rm list restore clean distclean edit docker docker.tar docs docs-check docs-html docs-pdf
 
 MAKEFLAGS += --silent
 
@@ -25,6 +25,10 @@ help:
 	@echo "help           | Shows this help"
 	@echo "run            | Runs the project"
 	@echo "test           | Runs the tests"
+	@echo "docs           | Builds and validates HTML/PDF documentation"
+	@echo "docs-check     | Validates every AsciiDoc source"
+	@echo "docs-html      | Builds the two HTML manuals"
+	@echo "docs-pdf       | Builds the two PDF manuals"
 	@echo "add PKG=<name> | Adds package"
 	@echo "rm PKG=<name>  | Removes package"
 	@echo "list           | List packages"
@@ -60,6 +64,7 @@ restore:
 clean:
 	dotnet clean
 	rm -f ${DOCKER_IMAGE_NAME}-${DOCKER_IMAGE_TAG}.tar
+	rm -rf artifacts/docs
 
 distclean: clean
 	rm -rf bin/

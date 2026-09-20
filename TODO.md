@@ -1,174 +1,138 @@
 # Aufgabenplanung
 
-Stand: 13. September 2026
+Stand: 20. September 2026
 
 Diese Datei fasst die geplanten Arbeiten und ihre Abhängigkeiten zusammen. Die
 GitHub-Issues bleiben die verbindliche Quelle für Anforderungen und Diskussionen.
-Technische Zwischenstände und Übergaben werden weiterhin in `HANDOFF.md`
-dokumentiert.
+Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 
 ## Übersicht
 
 | Priorität | Thema | Status | Abhängigkeiten |
 |---:|---|---|---|
-| 1 | [#9 Check Device](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Nächstes Arbeitspaket; Hardware-Captures ausstehend | #11 erfüllt; AnyTone und Retevis verfügbar |
-| 2 | [#10 SDS an Funkgerät senden](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Danach ausarbeiten | #11 erfüllt; DMR-Datenencoder |
-| 3 | [#15 Semantische DMR-Szenarien im Emulator](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Nach den Protokollarbeiten | #11 erfüllt; #9 und #10 |
-| 4 | [#16 Testorchestrator für mehrere Master](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #11 erfüllt; nach #15 |
-| 5 | [#14 CLI/TUI für den virtuellen DMR-Testteilnehmer](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | #11 erfüllt; stabile Szenario-API aus #15 |
-| 6 | [#17 Virtuelles Funkgerät kommuniziert mit echtem Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Planung erforderlich | #15; Hardware-/RF-Konzept offen |
+| 1 | [#10 SDS-Echo-Dienst](https://github.com/Nikoshi/DMRoute-ng/issues/10) | Encoder und Echo-Checkpoint implementiert; Hardwareabnahme offen | funktionierender Hotspot; AnyTone und Retevis |
+| 2 | [#9 Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Zurückgestellt bis zur Reparatur des zweiten Hotspots | zwei getrennte RF-Endpunkte |
+| 3 | [#24 Authentifizierte SDS-Sendeschnittstelle](https://github.com/Nikoshi/DMRoute-ng/issues/24) | Sicherheits- und API-Konzept erforderlich | Hardwareabschluss #10 |
+| 4 | [#25 CLI für SDS-Versand](https://github.com/Nikoshi/DMRoute-ng/issues/25) | Planung nach Festlegung der Schnittstelle | #10 und #24 |
+| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Nach den Protokollarbeiten | #9 und #10 |
+| 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Folgeticket | #9 und #15 |
+| 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
+| 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | stabile Szenario-API aus #15 |
+| 9 | [#23 Nix Flake](https://github.com/Nikoshi/DMRoute-ng/issues/23) | WIP-Issue ohne festgelegte Anforderungen | Konzept offen |
+| 10 | [#17 Virtuelles und echtes Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Hardware-/RF-Konzept offen | #15 |
 
-## 1. Check Device (#9)
+## 1. SDS-Echo-Dienst (#10)
 
-### Ziel
+### Aktueller Stand
 
-Der Master soll Radio-Check-Anfragen korrekt erkennen und beantworten können.
-Aktives Prüfen eines Teilnehmers vor Ablauf eines Roaming-Eintrags wird erst nach
-Klärung des grundlegenden Protokollablaufs bewertet.
-
-### Nächster Schritt
-
-- Einen reproduzierbaren Capture-Plan für AnyTone und Retevis in beiden
-  Nachrichtenrichtungen erstellen.
-- Radio Checks mit AnyTone und Retevis in beide Richtungen mitschneiden.
-- CSBK-/DMRD-Felder, Quell- und Zieladressierung, Antwortpakete, Wiederholungen
-  und Timeouts dokumentieren.
-- Prüfen, welcher Anteil bereits transparent durch `MicroSubnetRouter` geroutet
-  wird und welche semantische Verarbeitung fehlt.
-- Danach Issue #9 mit eindeutigem Verhalten und Hardware-Abnahmetest ergänzen.
-
-### Randbedingungen
-
-- Keine Implementierung aus vermuteten Paketformaten; der Hardware-Mitschnitt ist
-  Voraussetzung.
-- Neue Verarbeitung im DMR-Empfangspfad muss innerhalb vorkonfigurierter
-  Kapazitäten ohne verwaltete Allokationen arbeiten.
-- Paketwriter verwenden caller-eigene `Span<byte>`-Puffer und bleiben
-  NativeAOT-kompatibel.
-
-## 2. SDS an Funkgerät senden (#10)
-
-### Ziel
-
-Eine externe Anforderung soll eine private SDS vom Master zu einem erreichbaren
-Funkgerät auslösen können.
-
-### Offene Produktentscheidung
-
-Vor der Implementierung muss die externe Schnittstelle festgelegt werden. Zu
-bewerten sind mindestens MQTT und HTTP hinsichtlich Authentifizierung,
-Rückmeldung, Betriebsaufwand und NativeAOT-Unterstützung.
+- Der Checkpoint `d055e72` enthält TMS-, IPv4/UDP-, CRC-, BPTC-, Trellis- und
+  DMRD-Writer sowie den bestätigten privaten Versand.
+- TG `990099` beantwortet Gruppen-SDS `ECHO <Text>` lokal; reservierte
+  Dienstframes werden nicht geroutet oder per MQTT als SMS veröffentlicht.
+- Queue, Duplikatfenster und Transportzustand sind begrenzt und vorab reserviert.
+- Capture-basierte Codec-, Router-, ACK- und Allocation-Tests bestehen.
 
 ### Nächster Schritt
 
-- Aus den vorhandenen Hardware-Captures den vollständigen bestätigten
-  SDS-Dialog ableiten.
-- TMS-, UDP-, IPv4-, DMR-Datenheader-, BPTC- und Trellis-Writer sowie
-  Blocksequenzierung spezifizieren.
-- Zustellung, Bestätigung, Timeout, Wiederholung, Offline-Ziel und parallele
-  Nachrichten als Zustandsmodell festlegen.
-- Issue #10 anschließend um API, Fehlerantworten, Grenzen und Abnahmekriterien
-  ergänzen.
+- H10 aus dem Hardwaretestplan zuerst mit dem funktionierenden Hotspot für
+  AnyTone und Retevis ausführen.
+- Antwort, ACK beziehungsweise Timeout, höchstens drei Versuche, Duplikatschutz
+  und Überlänge im PCAP bestätigen.
+- Nach Reparatur des zweiten Hotspots nachweisen, dass Dienstframes lokal bleiben.
+- Issue #10 erst nach der Hardwareabnahme schließen.
 
-### Randbedingungen
+## 2. Radio Check (#9)
 
-- Der virtuelle Hotspot aus #11 dient als automatisierter Empfänger und
-  Protokollprüfer.
-- Versandzustand ist begrenzt und wird beim Start vorab reserviert.
-- Writer erhalten Zielpuffer vom Aufrufer; variable Paketarrays, Reflection und
-  dynamische Codeerzeugung sind im produktiven Pfad ausgeschlossen.
+### Aktueller Stand
 
-## 3. Semantische DMR-Szenarien im Emulator (#15)
-
-### Ziel
-
-Nach den Protokollanalysen aus #9 und #10 soll der Emulator Radio Check, Sprache
-und SDS aus semantischen Eingaben erzeugen können, statt nur Captures abzuspielen.
+- Der Ein-Hotspot-Lauf vom 13. September bestätigt die Gerätefunktion, enthält
+  aber keine UDP-seitig erfasste Antwort des Zielgeräts.
+- Aus den zwei erfassten Preambles wird ausdrücklich kein Parser abgeleitet.
+- Zwei Hotspots und vier Funkgeräte sind verfügbar; am zweiten Hotspot muss der
+  gelöste Antennenstecker repariert werden.
 
 ### Nächster Schritt
 
-- Benötigte Writer und Zustandsabläufe aus den bestätigten Hardware-Captures
-  ableiten.
-- Eine serverunabhängige Projektgrenze für gemeinsam nutzbare Protokollbausteine
-  festlegen.
+- Nach der Reparatur den Zwei-Hotspot-Aufbau des Capture-Plans herstellen.
+- Je drei erfolgreiche und unbeantwortete Prüfungen pro Geräterichtung isoliert
+  mitschneiden.
+- Anfrage, Antwort, Master-Rückleitung, Funkwiederholung, CRC und Timeout
+  bestimmen und erst danach den Parser implementieren.
 
-## 4. Testorchestrator für mehrere Master (#16)
+## 3. Authentifizierte SDS-Sendeschnittstelle (#24)
 
-### Ziel
+Auf Basis des hardwarebestätigten Senders aus #10 werden Authentifizierung,
+Autorisierung, Transportprotokoll, Replay-Schutz, Rate-Limit, Request-ID,
+Statusmodell und Fehlerantworten spezifiziert. Vor diesem Sicherheitskonzept wird
+keine öffentliche HTTP- oder MQTT-Sendeschnittstelle implementiert.
 
-Ein unabhängiges Testwerkzeug soll beliebig viele DMRoute-ng-Master starten,
-miteinander verbinden und gemeinsam mit den Teilnehmern aus #11 steuern können.
+## 4. CLI für SDS-Versand (#25)
 
-### Nächster Schritt
+Die spätere CLI verwendet ausschließlich die Schnittstelle aus #24. Sie erhält
+nichtinteraktive Argumente, maschinenlesbare Ausgabe, sichere Zugangsdaten und
+eindeutige Exit-Codes für Annahme, Zustellung, Timeout und Ablehnung.
 
-- Prozessmodell, dynamische Ports, Topologiekonfiguration sowie Start-,
-  Bereitschafts- und Stoppverhalten festlegen.
-- Beobachtbare Zustände, Fehlerfälle und Abnahmekriterien im Issue ergänzen.
+## 5. Semantische DMR-Szenarien (#15)
 
-### Randbedingungen
+Nach den bestätigten Paketformaten aus #9 und #10 soll der Emulator Radio Check,
+Sprache und SDS aus semantischen Eingaben erzeugen, statt ausschließlich
+aufgezeichnete DMRD-Frames abzuspielen. Gemeinsam nutzbare Writer bleiben vom
+Serverprojekt entkoppelt.
 
-- Der Orchestrator bleibt in einem eigenen Projekt vom Server unabhängig.
-- Die virtuellen Hotspots und Funkgeräte aus #11 bilden die Teilnehmerseite der
-  späteren Mehrmaster-Szenarien.
+## 6. Masterinitiierter Radio Check (#21)
 
-## 5. CLI/TUI für den virtuellen DMR-Testteilnehmer (#14)
+Nach #9 und #15 soll der Master selbst einen Radio Check auslösen und Antwort,
+Timeout, Wiederholungszahl und Dauer für interne Abläufe bereitstellen. Vorher
+sind Masteridentität, Auslöser, Zielarten, begrenzter Zustand und Rate-Limit zu
+entscheiden.
 
-### Ziel
+## 7. Testorchestrator (#16)
 
-Die programmatische API aus #11 soll später interaktiv bedient werden können.
-Das Frontend konfiguriert Verbindungen, zeigt den Sitzungszustand und spielt
-vorhandene Szenarien ab, ohne den Emulator an den Server zu koppeln.
+Ein unabhängiges Werkzeug soll mehrere Master mit dynamischen Ports und
+definierter Topologie starten, beobachten und beenden. Die virtuellen Hotspots
+und Funkgeräte aus #11 bilden die Teilnehmerseite.
 
-### Nächster Schritt
+## 8. Emulator-CLI/TUI (#14)
 
-- Nach Stabilisierung der semantischen Szenario-API Bedienmodell, sichere
-  PSK-Behandlung, Ausgabeformat und Abnahmekriterien im Issue festlegen.
-- Entscheiden, ob zuerst eine skriptbare CLI oder direkt eine TUI entsteht.
+Nach Stabilisierung der Szenario-API werden Bedienmodell, sichere PSK-Behandlung,
+Ausgabeformat und Abnahmekriterien festgelegt. Zuerst ist zwischen skriptbarer
+CLI und direkter TUI zu entscheiden.
 
-## 6. Virtuelles Funkgerät kommuniziert mit echtem Funkgerät (#17)
+## 9. Nix Flake (#23)
 
-### Ziel
+Das Issue ist derzeit leer und als WIP markiert. Umfang, unterstützte Systeme,
+Entwicklungsumgebung und Release-Bezug müssen vor einer Implementierung
+festgelegt werden.
 
-Der virtuelle Teilnehmer aus #11 soll später Tests mit einem echten Funkgerät
-ermöglichen, beispielsweise den Versand einer SDS an das reale Gerät.
+## 10. Virtuelles und echtes Funkgerät (#17)
 
-### Nächster Schritt
+Für die Kopplung eines virtuellen Teilnehmers mit echter RF-Hardware müssen
+Nachrichtenrichtung, unterstützte Geräte, RF-Grenze und Sicherheitsanforderungen
+geklärt werden. Die semantische Szenario-API aus #15 ist Voraussetzung.
 
-- RF-/Hardware-Grenze, Nachrichtenrichtung, unterstützte Geräte und benötigte
-  Protokollbausteine klären.
-- Abhängigkeiten, Sicherheitsgrenzen und Abnahmekriterien anschließend im Issue
-  festlegen.
+## Weitere Hardwarevalidierung
 
-### Randbedingungen
-
-- #11 stellt die bestätigte Transportgrundlage bereit; die semantische
-  Szenario-API aus #15 wird für die Funkaktionen benötigt.
-- Vor einer Implementierung ist ein Hardware- und Protokollkonzept erforderlich.
-
-## Spätere Hardware-Validierung
-
-- Gruppen-SDS mit mindestens zwei angemeldeten Hotspots prüfen. Der vorhandene
-  Mitschnitt bestätigt die korrekte Group-Call-Markierung, belegt aber noch keine
-  Verteilung an einen zweiten Hotspot.
-- Confirmed SDS vom Retevis-Gerät erneut untersuchen. Beim bisherigen Versuch
-  folgten auf den bestätigten Datenheader keine Rate-3/4-Datenblöcke.
+- Gruppen-SDS mit zwei angemeldeten Hotspots verteilen und fehlendes Echo zum
+  Ursprung nachweisen.
+- Confirmed SDS vom Retevis erneut untersuchen; im bisherigen Versuch folgten
+  auf den Datenheader keine Rate-3/4-Blöcke.
+- Den Echo-Dienst mit AnyTone und Retevis sowie anschließend mit zwei Hotspots
+  vollständig abnehmen.
 
 ## Abgeschlossen
 
 - [#11 Virtueller Homebrew-Hotspot und Funkgerät für Tests](https://github.com/Nikoshi/DMRoute-ng/issues/11),
-  umgesetzt mit [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18): am
-  13. September 2026 als `b849ae0` gemergt und durch den PR geschlossen.
+  umgesetzt mit [PR #18](https://github.com/Nikoshi/DMRoute-ng/pull/18).
 - [#8 Config-Wizard](https://github.com/Nikoshi/DMRoute-ng/issues/8), umgesetzt
-  mit [PR #13](https://github.com/Nikoshi/DMRoute-ng/pull/13): gemergt und durch
-  den PR geschlossen.
+  mit [PR #13](https://github.com/Nikoshi/DMRoute-ng/pull/13).
+- MQTT-Basis und Reconnect-Arbeiten aus #3 und #6 sind abgeschlossen.
 
 ## Pflege
 
 - Bei Beginn eines Arbeitspakets Status, Branch und nächsten konkreten Schritt
   aktualisieren.
-- Nach neuen Protokoll- oder Hardware-Erkenntnissen Abhängigkeiten und offene
+- Nach Protokoll- oder Hardwareerkenntnissen Abhängigkeiten und offene
   Entscheidungen nachführen.
-- Nach einem PR-Merge den Eintrag nach „Abgeschlossen“ verschieben und die
-  Reihenfolge der verbleibenden Aufgaben neu bewerten.
+- Nach einem PR-Merge den Eintrag nach „Abgeschlossen“ verschieben.
 - GitHub-Issue, `TODO.md` und `HANDOFF.md` dürfen sich beim Status eines
   Arbeitspakets nicht widersprechen.

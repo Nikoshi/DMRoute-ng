@@ -3,7 +3,13 @@
 :sectnums:
 
 == Übersicht
+
 Der `MicroSubnetRouter` ist für das zustandslose Routing von DMR-Paketen (DMRD) auf Basis von Subnetzen zuständig. Er ersetzt klassische, speicherintensive Talkgroup-Subscriptions durch eine mathematische Segmentierung.
+
+Vor dem normalen Routing behandelt der Router die reservierten lokalen
+Dienst-IDs `990000` bis `999999`. Datenframes an diese Ziele werden synchron an
+die Dienstschicht übergeben und nicht weitergeleitet oder als Teilnehmerroute
+gelernt. Pakete mit einer reservierten Dienst-ID als Quelle werden verworfen.
 
 == Subnetz-Berechnung & Haushalts-Bestimmung
 Die Zuordnung eines Funkgeräts oder Repeaters zu einem spezifischen Subnetz (Haushalt) erfolgt durch eine einfache Ganzzahldivision der DMR-ID:

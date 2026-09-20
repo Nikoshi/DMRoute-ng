@@ -35,3 +35,11 @@ Temporary Items
 # Standalone developer and test tools
 /tools/**/obj
 /tools/**/bin
+
+# Generated documentation
+/artifacts/docs/
+
+# Local hardware and protocol captures
+/captures/
+*.pcap
+*.pcapng

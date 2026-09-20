@@ -1,11 +1,14 @@
 # DMRoute-ng handoff
 
-## Active work: confirmed SDS echo service for issue #10
+## Active work: confirmed SDS echo service and documentation for issue #10
 
 - Work is on `feat/issue-10-sds-echo`, based on `origin/main` at `acc4860`.
 - The branch contains the confirmed outbound SDS transport and an internal echo service as the first hardware-testable slice of issue #10.
 - The general external API and its delivery result contract are not implemented yet.
 - Radio Check findings remain isolated on `feat/issue-9-radio-check` at `fc4e955`; they must not be merged implicitly into this branch.
+- The current uncommitted documentation update consolidates the operator manual,
+  hardware runbooks and issue-#9 findings without importing that branch's code or
+  history.
 
 ## Objective
 
@@ -32,6 +35,10 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - MQTT uses only `RawMqttClient`, QoS 0, a hard cut from the legacy topic paths, non-retained event topics, and retained per-entity state topics.
 - MQTT event buffering is bounded and keeps the newest events with `DropOldest`. State is rebuilt immediately after a reconnect and every ten seconds by default.
 - The hotspot ID in telemetry always comes from the authenticated DMRD packet/repeater state; no runtime hotspot ID is hardcoded.
+- Documentation is built as two stable deliverables: `DMRoute-ng-Handbuch.pdf`
+  for operation and architecture, and `DMRoute-ng-Hardwaretests.pdf` for test
+  plans and historical results. CI publishes both as an artifact; successful
+  main/master releases attach them to the matching commit release.
 
 ## Current state
 
@@ -68,6 +75,18 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - Removed the provisional CSBK `0x03` APRS hook: the CSBK only announces the transfer, while the position data is reassembled from the following `0x06`/`0x07` frames.
 - Added non-retained `dmroute/{zoneId}/sds/gps` publishing through `RawMqttClient`. MQTT location privacy defaults to a deterministic 10 km grid; exact coordinates can be enabled explicitly. Recognized GPS SMS text is replaced with `[GPS position redacted]` while privacy is active, including malformed `Template:` messages.
 - Added `docs/components/location-telemetry.adoc` with the input formats, data flow, raster equations, configuration, payload, protection properties, and limits. The hardware runbook now includes the H08 location/privacy acceptance test.
+- Added a German operator-first Quick Start, an SDS echo reference and an
+  emulator reference. `docs/handbook.adoc` and `docs/hardware-tests.adoc` assemble
+  the existing component and test documents into two books.
+- Added reproducible AsciiDoc HTML/PDF targets backed by pinned Bundler
+  dependencies. Generated files live below `artifacts/docs/` and remain
+  untracked.
+- Consolidated the issue-#9 Radio Check capture plan and the 2026-09-13
+  one-hotspot findings into the hardware-test book. The plan now explicitly
+  requires two independent RF endpoints after the antenna repair.
+- Updated README, task planning, configuration, routing, MQTT, location,
+  hot-path and emulator documentation for the current wizard and echo-service
+  behavior.
 
 ## Validation
 
@@ -86,6 +105,11 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - Captured DMRD frames reassemble and decode 100/100 times with 0 managed bytes allocated after warm-up. Enqueue/dequeue of 1,000 location value events also allocates 0 bytes.
 - Location tests cover the captured live RMC report, `GPRMC`/`GNRMC`, hemispheres, invalid fixes and checksums, AnyTone UTF-16LE GPS text, malformed-message redaction, and stable grid behavior including the dateline and polar region.
 - Raw MQTT loopback tests verify safe privacy defaults, explicit enable/disable, coordinate rastering, exact opt-out values, actual hotspot ID, null optional values, non-retained publication, SMS redaction, and rejection of invalid grid sizes.
+- `make docs` validates every standalone AsciiDoc source and builds both HTML
+  books and both PDFs without warnings. The generated handbook is 24 pages and
+  the hardware-test book is 21 pages.
+- Both GitHub workflow files parse as YAML, and `git diff --check` reports no
+  whitespace errors.
 
 ## Hardware validation
 

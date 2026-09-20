@@ -6,7 +6,9 @@
 
 Der UDP-Empfang, die DMR-Paketklassifizierung, Voice-/Data-Routing, Ping-Antworten und die Aufnahme von SDS-Blöcken müssen nach Start und Warm-up innerhalb der konfigurierten Kapazitäten ohne verwaltete Heap-Allokationen arbeiten.
 
-Die Fertigstellung einer SMS, MQTT-Verbindungsaufbau, Topologieänderungen und periodische Diagnose gehören nicht zu dieser harten Garantie. Auch dort werden unnötige Kopien vermieden.
+Die Dekodierung einer SMS zu einem .NET-String, MQTT-Verbindungsaufbau,
+Topologieänderungen und periodische Diagnose gehören nicht zu dieser harten
+Garantie. Auch dort werden unnötige Kopien vermieden.
 
 == Lebensdauer und Besitz
 
@@ -18,7 +20,14 @@ Ein Empfänger darf einen Paket-Span nicht speichern oder über ein `await` hina
 
 Kleine Protokollantworten und Decoder-Arbeitsbereiche verwenden `stackalloc`. Variable oder große Daten dürfen nicht dynamisch auf dem Stack reserviert werden.
 
-Der `SdsGateway` reassembliert Datenblöcke in einem beim Start reservierten Speicherbereich. NMEA-RMC- und AnyTone-GPS-Text werden direkt aus diesem Bereich gelesen. Der Decoder erzeugt ein `DmrLocationEvent` als Value Type und reiht es synchron in den begrenzten MQTT-Kanal ein. Erst der MQTT-Worker baut JSON und berechnet bei Bedarf das Privacy-Raster. Damit bleiben Reassembly, Positionserkennung und Event-Übergabe innerhalb der Hot-Path-Garantie.
+Der `SdsGateway` reassembliert Datenblöcke in einem beim Start reservierten
+Speicherbereich. NMEA-RMC- und AnyTone-GPS-Text werden direkt daraus gelesen.
+Vollständige Nachrichten werden synchron als `SdsMessageEvent` mit einem nur für
+den Callback gültigen `ReadOnlySpan<byte>` übergeben. Der MQTT-Pfad kopiert die
+Textbytes in einen vorab reservierten Slot; erst der Background-Worker erzeugt
+den .NET-String und das JSON. Location-Ereignisse bleiben kleine Value Types.
+Damit bleiben Reassembly, Positionserkennung und Event-Übergabe innerhalb der
+Hot-Path-Garantie.
 
 == Netzwerkpfad
 
@@ -52,7 +61,8 @@ Die Routingtabellen werden beim Start auf feste Maximalgrößen vorbereitet:
 
 |`Sds:MaxSessions`
 |128
-|Gleichzeitige SDS-Reassemblies
+|Gleichzeitige SDS-Reassemblies sowie Kapazität von Echo-Queue und
+Duplikatfenster
 
 |`Sds:MaxMessageBytes`
 |4096

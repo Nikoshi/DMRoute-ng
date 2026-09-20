@@ -14,23 +14,26 @@ Pfade unter `calls/`, `roaming/` und `sms/` werden nicht parallel publiziert.
 
 == Entkopplung vom Routing
 
-Call-/SMS- und Diagnoseereignisse gelangen über zwei begrenzte
+Call-, SMS-, Location- und Diagnoseereignisse gelangen über zwei begrenzte
 `System.Threading.Channels`-Kanäle zum Background-Service. Die Trennung erlaubt
-eigene Kapazitätsgrenzen für kleine Wert-Ereignisse und kopierte Rohframes. Die Event-Handler führen
-keine Netzwerk-I/O und keine JSON-Serialisierung im UDP-Thread aus. Ist der Kanal
-voll, wird das älteste Ereignis verworfen und `droppedMqttEvents` erhöht. Während
-einer Broker-Unterbrechung bleiben damit die neuesten Ereignisse bis zur
+eigene Kapazitätsgrenzen für Ereignisse und kopierte Rohframes. Die Event-Handler
+führen keine Netzwerk-I/O und keine JSON-Serialisierung im UDP-Thread aus. Ist
+der Kanal voll, wird das älteste Ereignis verworfen und `droppedMqttEvents`
+erhöht. Während einer Broker-Unterbrechung bleiben damit die neuesten Ereignisse bis zur
 konfigurierten Kapazität erhalten; der ursprüngliche UTC-Zeitstempel bleibt
 unverändert.
 
-Diagnoseframes werden synchron aus dem geliehenen `ReadOnlySpan<byte>` in einen beim
-Start reservierten Slot kopiert. Ein verworfener Kanaleintrag gibt seinen Slot sofort
-frei. Frames über `MaxDiagnosticFrameBytes` werden auf diese Grenze gekürzt.
+Diagnoseframes und vollständige SMS-Textbytes werden synchron aus dem geliehenen
+`ReadOnlySpan<byte>` in vorab reservierte Slots kopiert. Ein verworfener
+Kanaleintrag gibt seinen Slot sofort frei. Diagnoseframes über
+`MaxDiagnosticFrameBytes` werden auf diese Grenze gekürzt; SMS-Slots verwenden
+`Sds:MaxMessageBytes`.
 
 Der Publisher besitzt getrennte, wiederverwendete Topic- und JSON-Puffer für den
 Event- und Zustands-Loop. MQTT-Netzwerklatenz kann dadurch den DMR-Empfang nicht
-blockieren. Fertig dekodierte SMS-Strings sowie Background- und Verbindungsarbeit
-gehören nicht zur harten Allokationsgarantie.
+blockieren. SMS-Strings werden ausschließlich im Publisher aus dem reservierten
+Byte-Slot erzeugt. String-, Background- und Verbindungsarbeit gehören nicht zur
+harten Allokationsgarantie.
 
 Location-Ereignisse verwenden denselben kleinen Value-Type-Kanal wie Calls. Exakte
 Koordinaten werden erst im Publisher gemäß
@@ -140,7 +143,8 @@ Diese Topics sind nicht retained:
   `endReason` mit `Terminated` oder `Timeout`.
 * `dmroute/{zoneId}/sds/sms` enthält `srcId`, `dstId`, `message` und `timestamp`.
   Bei aktivierter Location-Privacy enthält eine erkannte GPS-SMS als Nachricht nur
-  `[GPS position redacted]`.
+  `[GPS position redacted]`. Nachrichten an reservierte lokale Dienste werden
+  nicht als SMS publiziert.
 * `dmroute/{zoneId}/sds/gps` enthält `srcId`, `dstId`, die tatsächliche `hotspotId`,
   `lat`, `lon`, `speedMps`, `courseDeg`, `altitudeM`, `fixValid`, `format`,
   `obfuscated`, `precisionKm` und `timestamp`. Fehlende Werte sind JSON `null`.

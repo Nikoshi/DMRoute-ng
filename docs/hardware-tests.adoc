@@ -1,0 +1,19 @@
+= DMRoute-ng-Hardwaretests
+:doctype: book
+:lang: de
+:toc: left
+:toc-title: Inhaltsverzeichnis
+:toclevels: 3
+:sectnums:
+:source-highlighter: rouge
+:icons: font
+
+include::hardware-test-plan.adoc[leveloffset=+1]
+
+include::radio-check-capture-plan.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-09-12.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-09-13-location.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-09-13-radio-check.adoc[leveloffset=+1]

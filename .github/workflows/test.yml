@@ -39,3 +39,25 @@ jobs:
         with:
           name: coverage-report
           path: coveragereport
+
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Validate and build documentation
+        run: make docs
+
+      - name: Upload PDF documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-pdf
+          path: artifacts/docs/*.pdf
+          if-no-files-found: error

@@ -1,0 +1,153 @@
+= Quick Start
+:toc:
+:sectnums:
+
+Dieser Einstieg richtet sich an Betreiber eines einzelnen DMRoute-ng-Masters mit
+mindestens einem Homebrew/MMDVM-Hotspot. Die Release-Binaries sind
+selbstenthaltende NativeAOT-Programme; auf dem Zielsystem muss keine .NET-Runtime
+installiert sein.
+
+== Unterstützte Release-Binaries
+
+Unter https://github.com/Nikoshi/DMRoute-ng/releases/latest[Releases] stehen
+derzeit diese Programme bereit:
+
+[cols="2,2,3",options="header"]
+|===
+|System |Datei |Erster Schritt
+
+|Linux x64
+|`DMRoute-ng`
+|`chmod +x DMRoute-ng`
+
+|Windows x64
+|`DMRoute-ng.exe`
+|In PowerShell mit `.\DMRoute-ng.exe` aufrufen
+|===
+
+Die ebenfalls angebotenen Dateien mit den Endungen `.dbg` und `.pdb` enthalten
+Debugsymbole und werden für den normalen Betrieb nicht benötigt. macOS- und
+ARM-Binaries werden derzeit nicht automatisch veröffentlicht.
+
+== Voraussetzungen
+
+Vor dem Setup werden benötigt:
+
+* eine feste IPv4-Adresse oder ein stabiler DNS-Name für den Master,
+* ein erreichbarer MQTT-Broker ohne TLS und ohne Benutzeranmeldung,
+* eingehendes UDP `62031` für Homebrew/MMDVM-Hotspots,
+* bei mehreren Mastern zusätzlich UDP `42069` für Mesh-Discovery,
+* eine Zonen-ID, ein eigenes starkes Zonen-PSK und ein gemeinsames Mesh-PSK.
+
+MQTT-Benutzername, Passwort und TLS sind noch nicht implementiert. Der Broker
+soll deshalb nur in einem vertrauenswürdigen Netz betrieben werden. Das
+standardmäßig aktivierte Privacy-Raster reduziert die Genauigkeit veröffentlichter
+Positionen, ersetzt aber keine Zugriffskontrolle.
+
+== Konfiguration erzeugen
+
+Für Linux:
+
+[source,shell]
+----
+./DMRoute-ng --setup --config ./dmroute.json
+----
+
+Für Windows PowerShell:
+
+[source,powershell]
+----
+.\DMRoute-ng.exe --setup --config .\dmroute.json
+----
+
+Im Wizard wählen die Pfeiltasten ein Feld. `Enter` bearbeitet den Wert,
+`Leertaste` schaltet boolesche Werte um, `A` blendet die erweiterten Einstellungen
+ein, `F10` oder `S` speichert und `Esc` bricht ab. Mindestens folgende Werte
+sollten bewusst gesetzt werden:
+
+* `Zone ID`: numerische Zone des Masters,
+* `Zone PSK`: gemeinsamer geheimer Präfix für Hotspots dieser Zone,
+* `Mesh PSK`: gemeinsamer Schlüssel aller verbundenen Master,
+* `MQTT host` und `MQTT port`,
+* `Location privacy` und `Location grid (km)`.
+
+Der erweiterte Bereich enthält die vorab reservierten Kapazitäten und den
+Schalter `SDS echo service`. Die erzeugte Datei enthält die PSKs im Klartext und
+erhält unter Unix den Modus `0600`.
+
+== Hotspot einrichten
+
+Die Hotspot-ID muss mathematisch zur Zone gehören:
+
+[source,text]
+----
+hotspotId / 10000 = zoneId
+----
+
+Für Zone `100` ist beispielsweise die Hotspot-ID `1000001` gültig. Das im
+Hotspot konfigurierte Homebrew-Passwort besteht ohne Trennzeichen aus dem
+Zonen-PSK und der vollständigen Hotspot-ID:
+
+[source,text]
+----
+<ZonePsk><HotspotId>
+----
+
+Bei `ZonePsk=change-me` und Hotspot `1000001` lautet das Passwort somit
+`change-me1000001`. Der Hotspot verbindet sich mit der IPv4-Adresse des Masters
+und UDP-Port `62031`.
+
+== Master starten
+
+Linux:
+
+[source,shell]
+----
+./DMRoute-ng --config ./dmroute.json
+----
+
+Windows PowerShell:
+
+[source,powershell]
+----
+.\DMRoute-ng.exe --config .\dmroute.json
+----
+
+Ein erfolgreicher Start meldet den gebundenen DMR-Port und den gestarteten
+Mesh-Service. Nach der Hotspot-Anmeldung müssen RPTL/RPTK/RPTC und anschließend
+regelmäßige Ping/Pong-Aktivität sichtbar sein. MQTT-Zustände erscheinen unter
+`dmroute/{zoneId}/`. Mit `Ctrl+C` wird der Prozess sauber beendet.
+
+== Optionaler SDS-Echo-Test
+
+Der Echo-Dienst ist standardmäßig aktiviert, benötigt eine fünfstellige DMR-ID
+und wird noch mit realer AnyTone-/Retevis-Hardware validiert. Ein Funkgerät sendet
+eine Gruppen-SDS mit TMS-Encoding UTF-16LE an TG `990099`:
+
+[source,text]
+----
+ECHO Hallo
+----
+
+Erwartet wird eine bestätigte private SDS vom Dienst `990099`:
+
+[source,text]
+----
+ECHO Hallo | RX <n> ms
+----
+
+Bleibt die Antwort aus, sind zuerst Hotspot-Anmeldung, Color Code, Teilnehmer-ID
+und `Services:Echo:Enabled` zu prüfen. Details enthält die
+link:components/sds-echo.adoc[SDS-Echo-Referenz].
+
+== Aus dem Quellcode starten
+
+Für Entwicklung und Tests wird das .NET-9-SDK benötigt:
+
+[source,shell]
+----
+dotnet restore
+dotnet run --project src/DMRoute_ng/DMRoute-ng.csproj -c Release -- --setup
+dotnet run --project src/DMRoute_ng/DMRoute-ng.csproj -c Release -- --config dmroute.json
+make test
+----
