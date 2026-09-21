@@ -17,3 +17,5 @@ include::hardware-test-results-2026-09-12.adoc[leveloffset=+1]
 include::hardware-test-results-2026-09-13-location.adoc[leveloffset=+1]
 
 include::hardware-test-results-2026-09-13-radio-check.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-09-21-sds.adoc[leveloffset=+1]

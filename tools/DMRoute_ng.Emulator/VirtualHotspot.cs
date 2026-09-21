@@ -16,6 +16,7 @@ public sealed class VirtualHotspot : IAsyncDisposable
     private readonly SemaphoreSlim _controlGate = new(1, 1);
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly Task _receiverTask;
+    private readonly int _dmrdQueueCapacity;
     private CancellationTokenSource? _keepaliveCancellation;
     private Task? _keepaliveTask;
     private int _state;
@@ -38,8 +39,9 @@ public sealed class VirtualHotspot : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(options), "KeepaliveInterval must be positive when configured.");
 
         _options = options;
-        _controlPackets = CreateChannel(Math.Min(options.ReceiveQueueCapacity, 32));
-        _dmrdPackets = CreateChannel(options.ReceiveQueueCapacity);
+        _dmrdQueueCapacity = options.ReceiveQueueCapacity;
+        _controlPackets = CreateChannel(Math.Min(options.ReceiveQueueCapacity, 32), BoundedChannelFullMode.Wait);
+        _dmrdPackets = CreateChannel(options.ReceiveQueueCapacity, BoundedChannelFullMode.DropOldest);
         _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         _socket.Bind(new IPEndPoint(IPAddress.Any, 0));
         _socket.Connect(options.MasterEndPoint);
@@ -50,6 +52,9 @@ public sealed class VirtualHotspot : IAsyncDisposable
     public TimeProvider TimeProvider => _options.TimeProvider;
     public IPEndPoint LocalEndPoint => (IPEndPoint)_socket.LocalEndPoint!;
     public VirtualHotspotState State => (VirtualHotspotState)Volatile.Read(ref _state);
+    public long DroppedDmrdPackets => Interlocked.Read(ref _droppedDmrdPackets);
+    public event Action<HomebrewDatagram>? DmrdReceived;
+    private long _droppedDmrdPackets;
 
     public async Task LoginAsync(CancellationToken cancellationToken = default)
     {
@@ -192,12 +197,12 @@ public sealed class VirtualHotspot : IAsyncDisposable
         SetState(VirtualHotspotState.Disconnected);
     }
 
-    private static Channel<HomebrewDatagram> CreateChannel(int capacity) =>
+    private static Channel<HomebrewDatagram> CreateChannel(int capacity, BoundedChannelFullMode fullMode) =>
         Channel.CreateBounded<HomebrewDatagram>(new BoundedChannelOptions(capacity)
         {
             SingleWriter = true,
             SingleReader = false,
-            FullMode = BoundedChannelFullMode.Wait
+            FullMode = fullMode
         });
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
@@ -213,8 +218,16 @@ public sealed class VirtualHotspot : IAsyncDisposable
                 var datagram = new HomebrewDatagram(
                     buffer.AsSpan(0, received).ToArray(),
                     _options.TimeProvider.GetUtcNow());
-                var target = HomebrewProtocol.IsDmrd(datagram.Payload) ? _dmrdPackets.Writer : _controlPackets.Writer;
-                if (target.TryWrite(datagram)) continue;
+                var isDmrd = HomebrewProtocol.IsDmrd(datagram.Payload);
+                if (isDmrd)
+                {
+                    DmrdReceived?.Invoke(datagram);
+                    if (_dmrdPackets.Reader.Count >= _dmrdQueueCapacity)
+                        Interlocked.Increment(ref _droppedDmrdPackets);
+                    _dmrdPackets.Writer.TryWrite(datagram);
+                    continue;
+                }
+                if (_controlPackets.Writer.TryWrite(datagram)) continue;
 
                 throw new HomebrewProtocolException(
                     $"The bounded receive queue for repeater {RepeaterId} is full.");

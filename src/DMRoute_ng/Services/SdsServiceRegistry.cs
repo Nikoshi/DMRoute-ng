@@ -20,6 +20,7 @@ public sealed class SdsServiceRegistry : IDisposable
             _services.Add(service.DestinationId, service);
         }
         gateway.OnMessageReceived += Dispatch;
+        gateway.OnDeliveryReportReceived += DispatchDeliveryReport;
     }
 
     private void Dispatch(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes)
@@ -28,5 +29,15 @@ public sealed class SdsServiceRegistry : IDisposable
             service.HandleMessage(in message, textBytes);
     }
 
-    public void Dispose() => _gateway.OnMessageReceived -= Dispatch;
+    private void DispatchDeliveryReport(in SdsDeliveryReportEvent report)
+    {
+        if (_services.TryGetValue(report.DestinationId, out var service))
+            service.HandleDeliveryReport(in report);
+    }
+
+    public void Dispose()
+    {
+        _gateway.OnMessageReceived -= Dispatch;
+        _gateway.OnDeliveryReportReceived -= DispatchDeliveryReport;
+    }
 }

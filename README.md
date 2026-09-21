@@ -70,3 +70,25 @@ make docs
 
 Die erzeugten HTML- und PDF-Dateien liegen anschließend unter
 `artifacts/docs/` und werden nicht eingecheckt.
+
+## Emulator-Playground
+
+Der experimentelle Playground verbindet mehrere virtuelle Homebrew-Hotspots mit
+einem bereits laufenden Master. Setup und Start erfolgen aus dem Quellbaum mit:
+
+```console
+make playground PLAYGROUND_ARGS='--setup --config dmroute-playground.json'
+make playground PLAYGROUND_ARGS='--config dmroute-playground.json'
+```
+
+Login, Ping, Disconnect, Raw-DMRD und Capture-Szenarien lassen sich anschließend
+interaktiv testen. Profilbasierte virtuelle Funkgeräte senden unbestätigte SDS
+an Talkgroups, bestätigte SDS an reale oder virtuelle Teilnehmer und halten
+empfangene Nachrichten in einer Inbox. Ein typischer Lauf beginnt mit
+`login all`, `radio announce all` und beispielsweise
+`sds send radio1 tg 9 "Hallo"` oder
+`sds send radio1 service 990099 "ECHO Hallo"`. Tab-Completion,
+Sitzungsverlauf und Ctrl+R erleichtern interaktive Tests. Die vollständige Bedienung beschreibt die
+[Emulator-Dokumentation](docs/components/emulator.adoc). Der Test-Workflow stellt
+zusätzlich self-contained Single-File-Artefakte für Linux x64 und Windows x64
+bereit; sie sind bewusst noch keine regulären Release-Dateien.

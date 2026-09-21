@@ -34,9 +34,11 @@ public sealed class SdsGateway
 
     public delegate void SdsMessageHandler(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes);
     public delegate void SdsLocationHandler(in DmrLocationEvent location);
+    public delegate void SdsDeliveryReportHandler(in SdsDeliveryReportEvent report);
 
     public event SdsMessageHandler? OnMessageReceived;
     public event SdsLocationHandler? OnLocationReceived;
+    public event SdsDeliveryReportHandler? OnDeliveryReportReceived;
     public long DroppedSessions => Interlocked.Read(ref _droppedSessions);
     public long OversizedMessages => Interlocked.Read(ref _oversizedMessages);
 
@@ -140,6 +142,20 @@ public sealed class SdsGateway
             return;
         }
 
+        if (TryDecodeDeliveryReport(message[..session.Length], out var deliveryStatus))
+        {
+            var report = new SdsDeliveryReportEvent(
+                sourceId,
+                session.DestinationId,
+                session.HotspotId,
+                session.IsGroupCall,
+                deliveryStatus,
+                now);
+            OnDeliveryReportReceived?.Invoke(in report);
+            ReleaseSession(slot);
+            return;
+        }
+
         if (TryDecodeMessage(message[..session.Length], out var encoding, out var textBytes))
         {
             var targetId = session.DestinationId;
@@ -240,6 +256,30 @@ public sealed class SdsGateway
 
         encoding = 0;
         textBytes = default;
+        return false;
+    }
+
+    private static bool TryDecodeDeliveryReport(
+        ReadOnlySpan<byte> message, out TmsDeliveryStatus deliveryStatus)
+    {
+        var ipOffset = message.IndexOf((byte)0x45);
+        while (ipOffset >= 0)
+        {
+            var ipv4 = new Ipv4Packet(message[ipOffset..]);
+            if (ipv4.IsValid)
+            {
+                var udp = new UdpDatagram(ipv4.Payload);
+                if (udp.IsValid && (udp.SourcePort == TmsMessageWriter.VendorPort ||
+                                    udp.DestinationPort == TmsMessageWriter.VendorPort) &&
+                    TmsDeliveryReport.TryRead(udp.Payload, out deliveryStatus))
+                    return true;
+            }
+
+            var next = message[(ipOffset + 1)..].IndexOf((byte)0x45);
+            ipOffset = next < 0 ? -1 : ipOffset + 1 + next;
+        }
+
+        deliveryStatus = default;
         return false;
     }
 

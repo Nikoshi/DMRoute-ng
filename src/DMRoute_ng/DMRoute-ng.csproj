@@ -15,4 +15,16 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\DMRoute_ng.Protocol\DMRoute_ng.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Coding\*.cs" />
+    <Compile Remove="Gateways\TmsMessageWriter.cs" />
+    <Compile Remove="Types\Ipv4Packet.cs" />
+    <Compile Remove="Types\TmsMessage.cs" />
+    <Compile Remove="Types\UdpDatagram.cs" />
+  </ItemGroup>
+
 </Project>

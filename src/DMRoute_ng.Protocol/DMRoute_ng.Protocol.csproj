@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\DMRoute_ng\Coding\*.cs" Link="Coding\%(Filename)%(Extension)" />
+    <Compile Include="..\DMRoute_ng\Gateways\TmsMessageWriter.cs" Link="Gateways\TmsMessageWriter.cs" />
+    <Compile Include="..\DMRoute_ng\Types\Ipv4Packet.cs" Link="Types\Ipv4Packet.cs" />
+    <Compile Include="..\DMRoute_ng\Types\TmsMessage.cs" Link="Types\TmsMessage.cs" />
+    <Compile Include="..\DMRoute_ng\Types\UdpDatagram.cs" Link="Types\UdpDatagram.cs" />
+  </ItemGroup>
+
+</Project>

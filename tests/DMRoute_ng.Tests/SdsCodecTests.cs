@@ -56,6 +56,84 @@ public sealed class SdsCodecTests
     }
 
     [Fact]
+    public void DeliveryReportWriter_ReproducesCapturedFuGBursts()
+    {
+        Span<byte> datagram = stackalloc byte[64];
+        Assert.True(TmsMessageWriter.TryWriteDeliveryReport(
+            datagram, 10003, 10001, 0x0013, out var datagramLength));
+        Assert.Equal(33, datagramLength);
+        Assert.Equal(
+            "4500002100130000401114960C0027130C0027110FA70FA7000DBA5E0003BF0001",
+            Convert.ToHexString(datagram[..datagramLength]));
+
+        var ipv4 = new Ipv4Packet(datagram[..datagramLength]);
+        Assert.True(ipv4.IsValid);
+        var udp = new UdpDatagram(ipv4.Payload);
+        Assert.True(udp.IsValid);
+        Assert.True(TmsDeliveryReport.TryRead(udp.Payload, out var status));
+        Assert.Equal(TmsDeliveryStatus.Delivered, status);
+
+        Span<byte> header = stackalloc byte[DmrBurstWriter.BurstLength];
+        DmrBurstWriter.WriteConfirmedDataHeader(header, 10003, 10001, 3, 11, 0, 1);
+        Assert.Equal(
+            "0393342101570A72210173CA058D5D7F77FD75733AB00034712409C30CCC0B21FD",
+            Convert.ToHexString(header));
+
+        Span<byte> fragment = stackalloc byte[48];
+        datagram[..datagramLength].CopyTo(fragment);
+        var crc = DmrCrc.MessageCrc32(fragment[..44]);
+        BinaryPrimitives.WriteUInt32LittleEndian(fragment[44..], crc);
+        var expectedBursts = new[]
+        {
+            "2132E12FE8F9624222B22862063D5D7F77FD757A87E3272F2ECD235820D2751BE9",
+            "20F9E91290252232313C2FB2C63D5D7F77FD757A867D23502D224F3BE52D7452D2",
+            "20E2222222B9ADE2222222EA063D5D7F77FD757A847F22222229FF0D22222229E6"
+        };
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        for (byte block = 0; block < 3; block++)
+        {
+            DmrBurstWriter.WriteConfirmedRateThreeQuarterBlock(
+                burst, fragment.Slice(block * 16, 16), block, 1);
+            Assert.Equal(expectedBursts[block], Convert.ToHexString(burst));
+        }
+    }
+
+    [Fact]
+    public void DeliveryReportParser_RejectsUnknownTmsPayload()
+    {
+        Assert.False(TmsDeliveryReport.TryRead([0x00, 0x03, 0xBF, 0x00, 0x00], out _));
+        Assert.False(TmsDeliveryReport.TryRead([0x00, 0x03, 0xBF, 0x00], out _));
+    }
+
+    [Fact]
+    public void UnconfirmedGroupWriters_RoundTripHeaderBlockAndOuterFlags()
+    {
+        Span<byte> header = stackalloc byte[DmrBurstWriter.BurstLength];
+        DmrBurstWriter.WriteUnconfirmedDataHeader(header, 10001, 9, 2, 16, true, 1);
+        Span<byte> decodedHeader = stackalloc byte[12];
+        Bptc19696.Decode(header, decodedHeader);
+        Assert.Equal(0x02, decodedHeader[0] & 0x0F);
+        Assert.NotEqual(0, decodedHeader[0] & 0x80);
+        Assert.NotEqual(0, decodedHeader[0] & 0x10);
+        Assert.Equal(0, decodedHeader[1] & 0x0F);
+        Assert.True(DmrCrc.CheckMaskedCcitt(decodedHeader, 0xCCCC));
+
+        Span<byte> data = stackalloc byte[18];
+        for (var index = 0; index < data.Length; index++) data[index] = (byte)index;
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        DmrBurstWriter.WriteUnconfirmedRateThreeQuarterBlock(burst, data, 1);
+        Span<byte> decodedData = stackalloc byte[18];
+        Assert.True(DmrTrellis.Decode(burst, decodedData));
+        Assert.True(data.SequenceEqual(decodedData));
+
+        Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
+        DmrBurstWriter.WriteDmrd(packet, burst, 1, 10001, 9, 1000001, 0x08, 42, 1, true);
+        Assert.True(DMRoute_ng.Emulator.HomebrewProtocol.TryReadDmrdInfo(packet, out var info));
+        Assert.Equal(1, info.Timeslot);
+        Assert.True(info.IsGroupCall);
+    }
+
+    [Fact]
     public void CrcWriters_MatchCapturedConfirmedMessage()
     {
         var messageAndPad = Convert.FromHexString(

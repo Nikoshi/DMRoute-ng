@@ -140,6 +140,18 @@ Bleibt die Antwort aus, sind zuerst Hotspot-Anmeldung, Color Code, Teilnehmer-ID
 und `Services:Echo:Enabled` zu prüfen. Details enthält die
 link:components/sds-echo.adoc[SDS-Echo-Referenz].
 
+Im Emulator-Playground kann derselbe Dienst nach `login all` mit der eindeutigen
+Service-Syntax angesprochen werden:
+
+[source,text]
+----
+sds send radio1 service 990099 "ECHO Hallo"
+sds watch radio1
+----
+
+Das virtuelle Funkgerät quittiert die private Echo-Antwort automatisch mit dem
+von realer Hardware beobachteten TMS-Zustellbericht.
+
 == Aus dem Quellcode starten
 
 Für Entwicklung und Tests wird das .NET-9-SDK benötigt:
@@ -151,3 +163,32 @@ dotnet run --project src/DMRoute_ng/DMRoute-ng.csproj -c Release -- --setup
 dotnet run --project src/DMRoute_ng/DMRoute-ng.csproj -c Release -- --config dmroute.json
 make test
 ----
+
+Für Protokollversuche mit einem bereits laufenden Master steht zusätzlich der
+interaktive Emulator-Playground bereit:
+
+[source,shell]
+----
+make playground PLAYGROUND_ARGS='--setup --config dmroute-playground.json'
+make playground PLAYGROUND_ARGS='--config dmroute-playground.json'
+----
+
+Der Wizard legt virtuelle Hotspots und Funkgeräte an. Im Playground werden
+zuerst die Hotspots angemeldet; `announce` macht anschließend die privaten
+Routen der virtuellen Funkgeräte bekannt:
+
+[source,text]
+----
+login all
+radio announce all
+sds send radio1 tg 9 "Hallo Gruppe"
+sds send radio1 fug 10002 "Hallo Funkgerät"
+sds inbox radio1
+----
+
+Eine TG-SDS ist unbestätigt. Eine private SDS wartet auf ACK beziehungsweise
+NACK und wird bei einem Timeout höchstens dreimal versucht. Für Nachrichten an
+ein reales FuG muss dessen Route dem Master bereits durch vorherigen Funkverkehr
+bekannt sein. Profilformat, alle REPL-Befehle und die Besonderheit, dass
+Gruppenverkehr nicht zum Ursprungshotspot zurückläuft, beschreibt die
+link:components/emulator.adoc[Emulator-Dokumentation].

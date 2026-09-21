@@ -4,13 +4,15 @@
 
 `DMRoute_ng.Emulator` ist eine eigenständige .NET-Bibliothek für automatisierte
 Homebrew-Protokollszenarien. Sie hängt weder von der DMRoute-ng-Serverassembly
-noch von einem Testframework ab. Eine spätere CLI oder TUI kann deshalb dieselbe
-API verwenden.
+noch von einem Testframework ab. Der separate Playground verwendet deshalb
+dieselbe API, ohne den Kern an eine Bedienoberfläche zu koppeln.
 
-Die erste Version unterstützt die vollständige Hotspot-Anmeldung (`RPTL`,
+Der Emulatorkern unterstützt die vollständige Hotspot-Anmeldung (`RPTL`,
 Challenge, `RPTK`, `RPTC`), manuelles oder periodisches Keepalive, Abmeldung,
 DMRD-Wiedergabe und die begrenzte Aufzeichnung der vom Master zurückgesendeten
-DMRD-Pakete.
+DMRD-Pakete. Virtuelle Funkgeräte erzeugen und empfangen zusätzlich semantische
+UTF-16LE-SDS: unbestätigt an Talkgroups sowie bestätigt mit TMS-Zustellbericht,
+Fallback-ACK/NACK und Retry an einzelne Teilnehmer.
 
 [source,csharp]
 ----
@@ -23,14 +25,206 @@ var hotspot = new VirtualHotspot(new VirtualHotspotOptions
 
 await hotspot.LoginAsync();
 await hotspot.PingAsync();
-await hotspot.SendDmrdAsync(frame);
-var response = await hotspot.ReceiveDmrdAsync();
+await using var radio = new VirtualRadio(hotspot, new VirtualRadioOptions
+{
+    RadioId = 10001,
+    Timeslot = 2,
+    Talkgroups = [9]
+});
+await radio.AnnounceAsync();
+await radio.SendSdsAsync(SdsTargetKind.Talkgroup, 9, "Hallo TG 9");
+var message = await radio.ReceiveSdsAsync();
 await hotspot.DisconnectAsync();
 await hotspot.DisposeAsync();
 ----
 
 `RadioScenario` übernimmt den Besitz der übergebenen Frames und bewahrt ihre
-relativen Zeitabstände. `VirtualRadio` prüft vor der Wiedergabe über einen
-konfigurierten Hotspot die Funkgerät-ID. Die Frame-Erzeugung aus semantischen
-Sprach-, CSBK- oder SDS-Eingaben und ein interaktives Frontend sind bewusst als
-getrennte Folgefunktionen geplant.
+relativen Zeitabstände. Die Capture-Wiedergabe bleibt neben dem semantischen
+SDS-Betrieb verfügbar. Die neutralen FEC-, CRC-, DMR-, IPv4/UDP- und TMS-Codecs
+werden in `DMRoute_ng.Protocol` einmalig kompiliert und sowohl vom Server als
+auch vom Emulator verwendet. Der Emulator referenziert weiterhin nicht die
+ausführbare Serverassembly.
+
+== Interaktiver Playground
+
+`DMRoute_ng.Playground` stellt eine einfache REPL über dem Emulatorkern bereit.
+Sie startet keinen Master, sondern verbindet sich per IPv4 mit einer bereits
+laufenden DMRoute-ng-Instanz. Mehrere benannte virtuelle Hotspots können
+gleichzeitig angemeldet werden, sodass sich Routingpfade ohne RF-Hardware
+beobachten lassen.
+
+Das lokale Profil wird interaktiv erzeugt:
+
+[source,shell]
+----
+make playground PLAYGROUND_ARGS='--setup --config dmroute-playground.json'
+make playground PLAYGROUND_ARGS='--config dmroute-playground.json'
+----
+
+Alternativ kann das gebaute Programm direkt als `DMRoute-ng-playground`
+beziehungsweise `DMRoute-ng-playground.exe` gestartet werden. Der Wizard fragt
+Master, Zonen-PSK, Hotspotdaten und virtuelle Funkgeräte ab. Er speichert je Hotspot das vollständige
+Homebrew-Passwort aus Zonen-PSK und Repeater-ID. Das JSON enthält Geheimnisse im
+Klartext, wird unter Unix deshalb mit Modus `0600` angelegt und ist über den
+Standardnamen `dmroute-playground.json` von Git ausgeschlossen. Ein Profil
+enthält mindestens einen und höchstens 64 eindeutig benannte Hotspots. Jedes
+Funkgerät erhält einen eindeutigen Namen, eine fünfstellige DMR-ID, einen
+vorhandenen Hotspot, Timeslot 1 oder 2 sowie seine Talkgroups. Ältere Profile
+ohne `Radios` bleiben gültig.
+
+[source,json]
+----
+"Radios": [
+  {
+    "Name": "radio1",
+    "RadioId": 10001,
+    "Hotspot": "hs1",
+    "Timeslot": 2,
+    "Talkgroups": [9],
+    "InboxCapacity": 128
+  }
+]
+----
+
+=== Befehle
+
+[cols="2,3",options="header"]
+|===
+|Befehl |Wirkung
+
+|`status`
+|Zeigt Master, Hotspot-ID, Sitzungszustand und lokalen UDP-Endpunkt ohne PSK.
+
+|`login <name\|all>`
+|Führt RPTL, RPTK und RPTC aus und startet den konfigurierten Keepalive.
+
+|`ping <name\|all>`
+|Sendet einen manuellen RPTPING und wartet auf MSTPONG.
+
+|`disconnect <name\|all>`
+|Sendet RPTCL und beendet den Keepalive.
+
+|`send <name> <DMRD-hex>`
+|Sendet ein vollständiges DMRD-Datagramm. Seine Repeater-ID muss bereits zum
+ausgewählten Hotspot passen.
+
+|`run <name> <scenario-file>`
+|Spielt ein Capture-Szenario mit seinen relativen Delays ab. Pfade mit
+Leerzeichen werden in Anführungszeichen gesetzt.
+
+|`receive <name> [timeout-ms]`
+|Wartet auf ein vom Master zurückgesendetes DMRD-Datagramm.
+
+|`watch <name>`
+|Zeigt fortlaufend empfangene Frames; `Ctrl+C` kehrt zur Eingabe zurück.
+
+|`clear <name>`
+|Entfernt alle aktuell gepufferten Empfangsframes.
+
+|`radio list`
+|Zeigt ID, Hotspot, Timeslot, Talkgroups, Routingstatus und Inbox-Zähler.
+
+|`radio announce <name\|all>`
+|Sendet einen privaten selbstadressierten CSBK. Seine Rückleitung bestätigt,
+dass der Master den privaten Pfad zum virtuellen Funkgerät gelernt hat.
+
+|`sds send <radio> tg <ziel-id> "<text>"`
+|Sendet eine unbestätigte Gruppen-SDS mit höchstens 120 Zeichen.
+
+|`sds send <radio> service <ziel-id> "<text>"`
+|Sendet eine unbestätigte Gruppen-SDS an eine reservierte lokale Service-ID
+zwischen `990000` und `999999`. Für Echo lautet das Ziel `990099`, der Text
+beginnt mit `ECHO `.
+
+|`sds send <radio> fug <ziel-id> "<text>"`
+|Sendet eine bestätigte private SDS. `radio` und `private` sind Aliase für
+`fug`; ACK, NACK oder Timeout werden ausgegeben.
+
+|`sds inbox <radio>`
+|Zeigt und entfernt alle ungelesenen SDS des Funkgeräts.
+
+|`sds watch <radio>`
+|Zeigt erst die Inbox und danach neue SDS; `Ctrl+C` kehrt zur Eingabe zurück.
+
+|`sds clear <radio>`
+|Entfernt alle ungelesenen SDS des Funkgeräts.
+
+|`exit`
+|Meldet konfigurierte Hotspots ab und beendet den Playground.
+|===
+
+In einem echten Terminal ergänzt `Tab` Befehle, Unterbefehle, konfigurierte
+Hotspot- und Funkgerätenamen, Zielarten, bekannte Talkgroups, Service-ID
+`990099` und Szenariopfade. `Pfeil hoch`/`Pfeil runter` navigieren durch die
+letzten 100 Befehle der laufenden Sitzung; `Ctrl+R` durchsucht diesen Verlauf
+rückwärts. Der Verlauf wird nicht auf Platte gespeichert. Bei umgeleiteter
+Eingabe bleibt die zeilenbasierte, skriptfähige REPL aktiv.
+
+Ein Fehler bei Anmeldung, Ping, Datei oder Frame beendet die REPL nicht.
+Empfangene DMRD-Pakete werden mit Zeit, Sequenz, Quell- und Ziel-ID,
+Repeater-ID, Slot, Group-/Private-Markierung, Datentyp, Stream-ID und Hexdump
+ausgegeben.
+
+Der SDS-Empfang läuft unabhängig von der aktuellen REPL-Aktion. Eine begrenzte
+Inbox hält pro Funkgerät standardmäßig 128 Nachrichten und verwirft bei
+Überlauf die älteste. Raw-`receive`/`watch` und SDS-Auswertung sehen dieselben
+eingehenden Frames, ohne sie sich gegenseitig wegzunehmen. Auch der Raw-Puffer
+hält die neuesten Frames; `status` meldet dessen Überlaufzähler, ohne den
+Hotspot oder den SDS-Empfang anzuhalten.
+
+Private Nachrichten werden bis zu dreimal gesendet; zwischen vollständigen
+Versuchen wartet das virtuelle Funkgerät 2,5 Sekunden auf eine Quittung. Jeder
+Versuch beginnt wie im Hardwaremitschnitt mit fünf CSBK-Preambles. Eingehende
+bestätigte Nachrichten werden nach erfolgreicher CRC- und TMS-Prüfung nach etwa
+500 ms mit einem vollständigen privaten TMS-Zustellbericht quittiert. Dieser
+besteht selbst aus bestätigtem Datenheader und drei Rate-3/4-Blöcken; sein
+TMS-Inhalt ist `00 03 BF 00 01`. Der frühere einzelne DMR-Response-Header bleibt
+als Kompatibilitäts-Fallback für ACK/NACK erhalten. Zustellberichte erscheinen
+nicht als Text in der Inbox und lösen keine weitere Quittung aus.
+
+Ein reales Ziel-FuG muss dem Master bereits durch eigenen Verkehr bekannt sein.
+Ein virtuelles Ziel wird vorher mit `radio announce` bekannt gemacht. Für den
+Gegenversuch vom virtuellen zum realen FuG sollte die virtuelle ID als digitaler
+Kontakt im Zielgerät hinterlegt sein; beim getesteten manuellen Dial wurde ohne
+diesen Kontakt zwar der Text angezeigt, aber kein Zustellbericht erzeugt.
+
+=== Szenarioformat
+
+Eine UTF-8-Szenariodatei enthält einen Namen, die Funkgerät-ID und danach pro
+Frame das Delay in Millisekunden sowie das vollständige DMRD-Datagramm:
+
+[source,text]
+----
+# Kommentar
+name=Captured group data
+radioId=10001
+0 444D5244...
+60 444D5244...
+----
+
+Leere Zeilen und mit `#` beginnende Kommentare werden ignoriert. Ein Szenario
+ist auf 10.000 Schritte und 4.096 Bytes je Frame begrenzt. Alle äußeren
+Quell-IDs müssen `radioId` entsprechen. Beim Abspielen schreibt der Playground
+die äußere Repeater-ID nur in seiner eigenen Framekopie auf den gewählten
+virtuellen Hotspot um; Capture-Datei und DMR-Burst bleiben unverändert.
+
+Unter `tools/DMRoute_ng.Playground/scenarios/anytone-fixed-beacon.dmrd` liegt ein
+vollständiges sanitisiertes AnyTone-Location-Capture für den lokalen Dienst
+`990099`. `group-routing-frame.dmrd` enthält zusätzlich einen einzelnen Frame
+an TG 9 für einen Routing-Smoke-Test: Werden zwei Hotspots angemeldet, kann der
+zweite mit `watch` die Weiterleitung anzeigen. Der einzelne Frame ist bewusst
+keine vollständige SDS-Transaktion.
+
+== Routinghinweise und Grenzen
+
+Der Playground importiert keine PCAP-Dateien und erzeugt keine semantischen
+Sprach- oder Radio-Check-Abläufe. Semantische SDS und der für `announce`
+benötigte CSBK sind implementiert; weitere Writer und Szenarien bleiben
+Gegenstand von Issue #15. Eine Vollbild-TUI bleibt eine mögliche Ausbaustufe von
+Issue #14.
+
+Der Master sendet Gruppenverkehr nicht an den Ursprungshotspot zurück. Zwei
+virtuelle Funkgeräte am selben Hotspot empfangen daher keine TG-SDS voneinander;
+ein Routingtest verwendet zwei virtuelle Hotspots. Das ist bewusst kein lokaler
+RF-Bus. Private Nachrichten zwischen Teilnehmern desselben Hotspots funktionieren,
+sobald der Zielpfad gelernt wurde.

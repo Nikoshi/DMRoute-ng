@@ -3,6 +3,7 @@ PROJECT_CONFIG ?= Release
 EDITOR := rider
 DOC_OUTPUT_DIR ?= artifacts/docs
 DOC_SOURCES := $(shell find docs -type f -name '*.adoc' ! -name 'handbook.adoc' ! -name 'hardware-tests.adoc')
+PLAYGROUND_ARGS ?=
 
 include dotnet.mk
 

@@ -6,9 +6,9 @@
 - The branch contains the confirmed outbound SDS transport and an internal echo service as the first hardware-testable slice of issue #10.
 - The general external API and its delivery result contract are not implemented yet.
 - Radio Check findings remain isolated on `feat/issue-9-radio-check` at `fc4e955`; they must not be merged implicitly into this branch.
-- The current uncommitted documentation update consolidates the operator manual,
-  hardware runbooks and issue-#9 findings without importing that branch's code or
-  history.
+- The uncommitted Playground extension adds profile-backed virtual radios,
+  bidirectional semantic SDS, hardware-compatible TMS delivery reports, inboxes,
+  service targets and an interactive line editor.
 
 ## Objective
 
@@ -24,9 +24,16 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - Issue #9 remains deferred on its separate branch until a second RF endpoint can capture the target response without the single-simplex-hotspot collision observed previously.
 - Issue #15 follows both protocol efforts and turns their verified packet flows into semantic emulator scenarios.
 - Issue #16 follows #15 so multi-master tests can use the mature scenario API. Issue #14 follows after that API stabilizes; hardware-coupled #17 remains last.
-- `tools/DMRoute_ng.Emulator` is a .NET 9 core library with no reference to the DMRoute-ng server assembly or xUnit. A later CLI/TUI will consume its public API.
-- `VirtualHotspot` owns the UDP session and models login, configuration, keepalive, disconnect, bounded DMRD capture and explicit protocol states. `VirtualRadio` replays owned `RadioScenario` frames with relative timing.
-- The first version replays sanitized captured DMRD frames. Semantic voice, CSBK and SDS generation is deferred to #15.
+- `tools/DMRoute_ng.Emulator` is a .NET 9 core library with no reference to the DMRoute-ng server assembly or xUnit. Server and emulator consume the shared `DMRoute_ng.Protocol` codec assembly.
+- `VirtualHotspot` owns the UDP session and models login, configuration, keepalive, disconnect, bounded DMRD capture and explicit protocol states. Its receive fan-out lets raw inspection and attached radios observe the same frame independently.
+- `VirtualRadio` retains capture replay and now sends unconfirmed group SDS, sends confirmed private SDS with delivery-report/ACK/NACK retry, reassembles received TMS messages, acknowledges valid private transfers and stores text messages in a bounded inbox.
+- A real FuG-to-FuG capture proved that positive AnyTone delivery is a complete
+  private TMS transaction with payload `00 03 BF 00 01`, not the previously
+  assumed single DMR response header. The latter remains a compatibility fallback.
+- Confirmed emulator transactions use five CSBK preambles. Automatic delivery
+  reports wait about 500 ms; REPL sends wait 2.5 seconds between attempts and
+  the echo service waits three seconds.
+- Virtual radios are declared in the Playground profile with a five-digit ID, hotspot, timeslot, talkgroups and inbox capacity. Private inbound routing is primed explicitly with a self-addressed `radio announce` CSBK.
 - Production binding remains `0.0.0.0:62031`; internal test hooks allow port `0`, await socket readiness and trigger the existing 45-second repeater liveness sweep deterministically.
 - Small decentralized deployment defaults: 256 active calls, 8,192 learned local routes, 128 SDS sessions, and 4,096 bytes per SDS message.
 - When a bounded table is full, continue routing but do not add new tracking state. Increment a diagnostic counter instead.
@@ -87,11 +94,26 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - Updated README, task planning, configuration, routing, MQTT, location,
   hot-path and emulator documentation for the current wizard and echo-service
   behavior.
+- Added `DMRoute_ng.Playground`, an interactive terminal REPL over the independent
+  emulator core. It connects multiple named virtual hotspots to an already
+  running IPv4 master, supports session commands, raw DMRD, text capture
+  scenarios and decoded receive output without exposing PSKs.
+- Playground profiles use atomic JSON writes and Unix mode `0600`. Scenario
+  replay validates source IDs and delays, bounds file content and normalizes only
+  the copied outer repeater ID for the selected virtual hotspot.
+- CI publishes experimental self-contained single-file Playground artifacts for
+  Linux x64 and Windows x64; regular release assets remain unchanged.
+- Added `radio list`, `radio announce`, `sds send`, `sds inbox`, `sds watch` and
+  `sds clear` to the Playground REPL. Group SDS uses unconfirmed rate-3/4 data;
+  private SDS uses the confirmed transport and automatic TMS delivery reports.
+- The REPL accepts `service 990099`, rejects reserved IDs on the private `fug`
+  path with actionable guidance, and provides Tab completion, in-memory
+  Up/Down history and Ctrl+R reverse search on an interactive terminal.
 
 ## Validation
 
 - Release build succeeds with 0 warnings and 0 errors.
-- `make test` passes 75/75 tests in Release mode.
+- `make test` passes 104/104 tests in Release mode with 0 build warnings.
 - Codec tests reproduce captured UTF-16LE TMS datagrams, BPTC/trellis bursts and confirmed-message CRCs byte-for-byte.
 - Service tests cover local consumption, reserved-source rejection, duplicate suppression, private confirmed reply delivery with ACK, and zero-allocation warmed classification.
 - Warmed allocation tests report 0 bytes for group routing, known ping, unknown DMRD/ping, new state within reserved capacity, a full call table and SDS header ingestion.
@@ -106,10 +128,24 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - Location tests cover the captured live RMC report, `GPRMC`/`GNRMC`, hemispheres, invalid fixes and checksums, AnyTone UTF-16LE GPS text, malformed-message redaction, and stable grid behavior including the dateline and polar region.
 - Raw MQTT loopback tests verify safe privacy defaults, explicit enable/disable, coordinate rastering, exact opt-out values, actual hotspot ID, null optional values, non-retained publication, SMS redaction, and rejection of invalid grid sizes.
 - `make docs` validates every standalone AsciiDoc source and builds both HTML
-  books and both PDFs without warnings. The generated handbook is 24 pages and
-  the hardware-test book is 21 pages.
+  books and both PDFs without warnings.
 - Both GitHub workflow files parse as YAML, and `git diff --check` reports no
   whitespace errors.
+- Playground tests cover profile validation and permissions, setup PSK
+  derivation, quoted commands, DMRD inspection, malformed scenarios, secret-safe
+  output and a real two-hotspot login/ping/replay/receive/disconnect loop.
+- Virtual-radio loopback tests cover padded unconfirmed group SDS, talkgroup
+  filtering, simultaneous raw capture, explicit route announcement, confirmed
+  private delivery with automatic TMS report and bounded retry timeout. An additional
+  codec test round-trips the unconfirmed header, rate-3/4 block and outer
+  group/timeslot flags.
+- Golden-vector tests reproduce the 2026-09-21 FuG delivery-report datagram,
+  confirmed header and three data bursts byte-for-byte. Warmed delivery-report
+  ingestion allocates 0 managed bytes.
+- Self-contained single-file publish smoke tests succeed for `linux-x64` and
+  `win-x64`; each output contains the executable and both sanitized example
+  scenarios. The local framework-dependent binary also returns the expected
+  `--help` usage.
 
 ## Hardware validation
 
@@ -129,13 +165,25 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 - The private location captures remain in `/tmp/dmroute-aprs-real.pcap` and `/tmp/dmroute-aprs-gps.pcap` and are intentionally excluded from Git.
 - H08 passed on 2026-09-13 against a local MQTT probe: automatic `NMEA_RMC` and manual `ANYTONE_GPS_TEXT` events carried hotspot ID `1000001`, were non-retained, used the same 10 km grid cell, and stayed within 10 km of the decoded fixes. The paired manual SMS contained only `[GPS position redacted]`; an automated scan found no exact manual coordinate in MQTT and `droppedMqttEvents` remained `0`.
 - The privacy-safe MQTT evidence is `/tmp/dmroute-location-mqtt.log`; `docs/hardware-test-results-2026-09-13-location.adoc` records the result without exact local coordinates.
+- The 2026-09-21 SDS captures prove that a real positive receipt is a complete
+  TMS message. `docs/hardware-test-results-2026-09-21-sds.adoc` records the
+  sanitized finding; raw PCAPs remain under `/private/tmp`.
 
 ## Known limits
 
 - The current issue-#10 slice exposes only the radio-facing echo service. It has no general HTTP, MQTT or command-line send API and no external delivery-state contract.
 - Echo replies are serialized through one background worker; parallel outbound confirmed-SDS transactions are intentionally deferred until the general delivery model is specified.
-- The emulator currently has only a programmatic API and recorded-frame replay; interactive use and semantic frame generation are tracked in #14 and #15.
-- UDP is intentionally IPv4-only, matching the server. Emulator receive queues are bounded and fail visibly on overflow.
+- The emulator now has a capture-based interactive REPL plus semantic SDS.
+  Semantic voice and Radio Check generation remain tracked in #15; a possible
+  full-screen TUI remains in #14.
+- The Playground requires an already running master. It does not start server
+  processes, import PCAP files or emulate a local RF channel.
+- Group frames are not returned to their origin hotspot, so two virtual radios
+  attached to that same hotspot cannot use the master to hear each other's TG
+  SDS. Use separate virtual hotspots for that routing test.
+- UDP is intentionally IPv4-only, matching the server. Emulator receive queues
+  are bounded; raw DMRD capture keeps the newest frames and reports its drop
+  count, while control-queue overflow still fails visibly.
 - Completed SMS strings and MQTT connection work may allocate by design.
 - MQTT credentials and TLS are not implemented.
 - A QoS-0 event already removed from the channel can be lost if the TCP publish fails. Retained registry state is reconstructed after reconnect; diagnostic frames longer than `Mqtt:MaxDiagnosticFrameBytes` are truncated.
@@ -146,4 +194,7 @@ Preserve a tested checkpoint of the outbound confirmed-SDS encoder and validate 
 
 ## Precise next step
 
-Run a real `ECHO` transaction through the working hotspot and capture request, outbound reply, radio ACK and retry timing. After the second hotspot antenna connector is repaired, resume the separate issue-#9 Radio Check capture plan with independent RF endpoints.
+Add virtual ID `10002` as a digital contact in real FuG `10003`, then repeat
+real-to-virtual, virtual-to-real and `service 990099` echo transactions. After
+the second hotspot antenna connector is repaired, resume the separate issue-#9
+Radio Check capture plan with independent RF endpoints.

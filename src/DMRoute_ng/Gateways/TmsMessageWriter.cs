@@ -10,6 +10,7 @@ public static class TmsMessageWriter
     private const int UdpHeaderLength = 8;
     private const int TmsHeaderLength = 6;
     private const int LeadingLineBreakLength = 4;
+    private const int DeliveryReportLength = 5;
 
     public static bool TryWriteUtf16LittleEndian(
         Span<byte> destination,
@@ -57,6 +58,42 @@ public static class TmsMessageWriter
         return true;
     }
 
+    public static bool TryWriteDeliveryReport(
+        Span<byte> destination,
+        int sourceId,
+        int destinationId,
+        ushort identification,
+        out int written)
+    {
+        written = 0;
+        if (sourceId is < 0 or > 0xFFFFFF || destinationId is < 0 or > 0xFFFFFF)
+            return false;
+
+        const int udpLength = UdpHeaderLength + DeliveryReportLength;
+        const int totalLength = IpHeaderLength + udpLength;
+        if (destination.Length < totalLength) return false;
+
+        var packet = destination[..totalLength];
+        packet.Clear();
+        packet[0] = 0x45;
+        BinaryPrimitives.WriteUInt16BigEndian(packet[2..4], totalLength);
+        BinaryPrimitives.WriteUInt16BigEndian(packet[4..6], identification);
+        packet[8] = 64;
+        packet[9] = 17;
+        WriteDerivedAddress(packet[12..16], sourceId);
+        WriteDerivedAddress(packet[16..20], destinationId);
+        BinaryPrimitives.WriteUInt16BigEndian(packet[10..12], InternetChecksum(packet[..IpHeaderLength]));
+
+        var udp = packet[IpHeaderLength..];
+        BinaryPrimitives.WriteUInt16BigEndian(udp[0..2], VendorPort);
+        BinaryPrimitives.WriteUInt16BigEndian(udp[2..4], VendorPort);
+        BinaryPrimitives.WriteUInt16BigEndian(udp[4..6], udpLength);
+        TmsDeliveryReport.DeliveredPayload.CopyTo(udp[UdpHeaderLength..]);
+        BinaryPrimitives.WriteUInt16BigEndian(udp[6..8], UdpChecksum(packet[12..20], udp));
+        written = totalLength;
+        return true;
+    }
+
     private static void WriteDerivedAddress(Span<byte> destination, int id)
     {
         destination[0] = 12;
@@ -94,5 +131,27 @@ public static class TmsMessageWriter
         while ((sum >> 16) != 0) sum = (sum & 0xFFFF) + (sum >> 16);
         var result = (ushort)~sum;
         return result == 0 ? (ushort)0xFFFF : result;
+    }
+}
+
+public enum TmsDeliveryStatus : byte
+{
+    Delivered = 1
+}
+
+public static class TmsDeliveryReport
+{
+    internal static ReadOnlySpan<byte> DeliveredPayload => [0x00, 0x03, 0xBF, 0x00, 0x01];
+
+    public static bool TryRead(ReadOnlySpan<byte> payload, out TmsDeliveryStatus status)
+    {
+        if (payload.SequenceEqual(DeliveredPayload))
+        {
+            status = TmsDeliveryStatus.Delivered;
+            return true;
+        }
+
+        status = default;
+        return false;
     }
 }

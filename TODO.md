@@ -14,10 +14,10 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 2 | [#9 Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Zurückgestellt bis zur Reparatur des zweiten Hotspots | zwei getrennte RF-Endpunkte |
 | 3 | [#24 Authentifizierte SDS-Sendeschnittstelle](https://github.com/Nikoshi/DMRoute-ng/issues/24) | Sicherheits- und API-Konzept erforderlich | Hardwareabschluss #10 |
 | 4 | [#25 CLI für SDS-Versand](https://github.com/Nikoshi/DMRoute-ng/issues/25) | Planung nach Festlegung der Schnittstelle | #10 und #24 |
-| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Nach den Protokollarbeiten | #9 und #10 |
+| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | SDS umgesetzt; Sprache und Radio Check offen | #9 und #10 |
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Folgeticket | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
-| 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | Planung erforderlich | stabile Szenario-API aus #15 |
+| 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit virtuellen Hotspots, Funkgeräten und SDS umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
 | 9 | [#23 Nix Flake](https://github.com/Nikoshi/DMRoute-ng/issues/23) | WIP-Issue ohne festgelegte Anforderungen | Konzept offen |
 | 10 | [#17 Virtuelles und echtes Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Hardware-/RF-Konzept offen | #15 |
 
@@ -74,10 +74,14 @@ eindeutige Exit-Codes für Annahme, Zustellung, Timeout und Ablehnung.
 
 ## 5. Semantische DMR-Szenarien (#15)
 
-Nach den bestätigten Paketformaten aus #9 und #10 soll der Emulator Radio Check,
-Sprache und SDS aus semantischen Eingaben erzeugen, statt ausschließlich
-aufgezeichnete DMRD-Frames abzuspielen. Gemeinsam nutzbare Writer bleiben vom
-Serverprojekt entkoppelt.
+Der Emulator erzeugt SDS bereits aus semantischen Eingaben: unbestätigt an
+Talkgroups und bestätigt mit TMS-Zustellbericht sowie ACK/NACK-Fallback an
+einzelne Teilnehmer. Empfang, TMS-Dekodierung, Inbox und automatische
+Bestätigung sind ebenfalls umgesetzt. Der Playground bietet dafür zusätzlich
+Service-Ziele, Completion, Verlauf und Ctrl+R-Suche.
+Radio Check und Sprache folgen nach den noch ausstehenden Capture-Erkenntnissen.
+Gemeinsam genutzte Codecs liegen in `DMRoute_ng.Protocol` und bleiben von der
+Serverassembly entkoppelt.
 
 ## 6. Masterinitiierter Radio Check (#21)
 
@@ -94,9 +98,15 @@ und Funkgeräte aus #11 bilden die Teilnehmerseite.
 
 ## 8. Emulator-CLI/TUI (#14)
 
-Nach Stabilisierung der Szenario-API werden Bedienmodell, sichere PSK-Behandlung,
-Ausgabeformat und Abnahmekriterien festgelegt. Zuerst ist zwischen skriptbarer
-CLI und direkter TUI zu entscheiden.
+Der REPL-Playground verwaltet mehrere virtuelle Hotspots und Funkgeräte, führt
+Login, Ping, Disconnect und explizite Radio-Ankündigungen aus, sendet SDS und
+Raw-DMRD, spielt Capture-Szenarien ab und zeigt Frames sowie SDS-Inboxen an.
+Profile werden lokal mit restriktiven Dateirechten gespeichert; Linux- und
+Windows-Builds entstehen als CI-Artefakte.
+
+Semantische Befehle für Sprache und Radio Check folgen nach den Writern aus #15.
+Danach wird bewertet, ob die REPL genügt oder eine Vollbild-TUI echten Mehrwert
+bietet.
 
 ## 9. Nix Flake (#23)
 

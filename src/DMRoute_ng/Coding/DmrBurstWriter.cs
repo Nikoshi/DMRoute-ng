@@ -46,6 +46,30 @@ public static class DmrBurstWriter
         WriteSlotTypeAndSync(destination, colorCode, 0x06);
     }
 
+    public static void WriteUnconfirmedDataHeader(
+        Span<byte> destination,
+        int sourceId,
+        int destinationId,
+        byte blocksToFollow,
+        byte padOctets,
+        bool isGroupCall,
+        byte colorCode = 1)
+    {
+        Span<byte> decoded = stackalloc byte[12];
+        if (padOctets > 31) throw new ArgumentOutOfRangeException(nameof(padOctets));
+        decoded[0] = (byte)((isGroupCall ? 0x80 : 0x00) |
+                            ((padOctets & 0x10) != 0 ? 0x10 : 0x00) |
+                            0x02); // GI, high pad bit and unconfirmed packet data.
+        decoded[1] = (byte)(0x40 | (padOctets & 0x0F)); // IP SAP plus pad count.
+        WriteId(decoded[2..5], destinationId);
+        WriteId(decoded[5..8], sourceId);
+        decoded[8] = blocksToFollow;
+        decoded[9] = 0;
+        DmrCrc.WriteMaskedCcitt(decoded[10..12], decoded[..10], DataHeaderMask);
+        Bptc19696.Encode(decoded, destination);
+        WriteSlotTypeAndSync(destination, colorCode, 0x06);
+    }
+
     public static void WriteConfirmedRateThreeQuarterBlock(
         Span<byte> destination, ReadOnlySpan<byte> data, byte serialNumber, byte colorCode = 1)
     {
@@ -56,6 +80,14 @@ public static class DmrBurstWriter
         decoded[1] = (byte)crc;
         data.CopyTo(decoded[2..]);
         DmrTrellis.Encode(decoded, destination);
+        WriteSlotTypeAndSync(destination, colorCode, 0x08);
+    }
+
+    public static void WriteUnconfirmedRateThreeQuarterBlock(
+        Span<byte> destination, ReadOnlySpan<byte> data, byte colorCode = 1)
+    {
+        if (data.Length != 18) throw new ArgumentException("An unconfirmed rate-3/4 block contains 18 data bytes.", nameof(data));
+        DmrTrellis.Encode(data, destination);
         WriteSlotTypeAndSync(destination, colorCode, 0x08);
     }
 
@@ -103,7 +135,9 @@ public static class DmrBurstWriter
         int destinationId,
         int repeaterId,
         byte dataType,
-        uint streamId)
+        uint streamId,
+        int timeslot = 2,
+        bool isGroupCall = false)
     {
         if (destination.Length < DmrdLength) throw new ArgumentException("DMRD output must contain 53 bytes.", nameof(destination));
         if (burst.Length < BurstLength) throw new ArgumentException("A DMR burst contains 33 bytes.", nameof(burst));
@@ -112,7 +146,11 @@ public static class DmrBurstWriter
         WriteId(destination[5..8], sourceId);
         WriteId(destination[8..11], destinationId);
         BinaryPrimitives.WriteInt32BigEndian(destination[11..15], repeaterId);
-        destination[15] = (byte)(0xE0 | (dataType & 0x0F));
+        if (timeslot is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(timeslot));
+        destination[15] = (byte)(0x20 |
+                                 (timeslot == 2 ? 0x80 : 0x00) |
+                                 (isGroupCall ? 0x00 : 0x40) |
+                                 (dataType & 0x0F));
         BinaryPrimitives.WriteUInt32BigEndian(destination[16..20], streamId);
         burst[..BurstLength].CopyTo(destination[20..53]);
     }

@@ -6,4 +6,5 @@ public interface ISdsService
 {
     int DestinationId { get; }
     void HandleMessage(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes);
+    void HandleDeliveryReport(in SdsDeliveryReportEvent report);
 }

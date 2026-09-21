@@ -48,10 +48,12 @@ einmal beantwortet.
 
 == Bestätigter Versand
 
-Eine Antwort besteht aus vier CSBK-Preambles, einem bestätigten Datenheader und
+Eine Antwort besteht aus fünf CSBK-Preambles, einem bestätigten Datenheader und
 den Rate-3/4-Datenblöcken des TMS-Datagramms. Zwischen den Bursts liegen 60 ms.
-Der Dienst wartet anschließend bis zu zwei Sekunden auf die bestätigte Antwort
-des Funkgeräts. Bei Timeout oder negativer Antwort wird die vollständige
+Der Dienst wartet anschließend bis zu drei Sekunden auf den positiven privaten
+TMS-Zustellbericht `00 03 BF 00 01` des Funkgeräts. Der ältere einzelne
+DMR-Response-Header wird weiterhin als ACK/NACK-Fallback akzeptiert. Bei Timeout
+oder negativer Antwort wird die vollständige
 Transaktion höchstens zweimal wiederholt, also insgesamt maximal dreimal
 gesendet.
 

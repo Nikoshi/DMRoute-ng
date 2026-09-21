@@ -1,0 +1,70 @@
+= SDS-Zustellberichte mit realen FuG am 21.09.2026
+:toc:
+:sectnums:
+
+== Ziel und Aufbau
+
+Der Versuch klärte, weshalb eine bestätigte private SDS vom realen FuG `10003`
+zum virtuellen FuG `10002` zwar in dessen Inbox erschien, das sendende FuG aber
+keine Bestätigung erkannte. Zusätzlich wurde mit zwei realen FuG eine
+funktionierende Referenztransaktion `10001 -> 10003` aufgezeichnet. Der Master
+lief auf demselben Rechner wie der Playground; Hotspot `1010001` bildete die
+reale RF-Seite, der virtuelle Hotspot `1010010` die Emulatorseite.
+
+Die PCAP-Dateien liegen ausschließlich unter `/private/tmp` und werden wegen
+der lokalen Netzwerkdaten nicht eingecheckt.
+
+== Ergebnis des ersten Versuchs
+
+Die komplette bestätigte SDS `10003 -> 10002` erreichte das virtuelle FuG und
+wurde korrekt reassembliert. Der Emulator erzeugte daraufhin seinen damaligen
+einzelnen DMR-Response-Header. Der Master routete diesen Header bis zum realen
+Hotspot; das FuG akzeptierte ihn jedoch nicht als TMS-Zustellbestätigung und
+wiederholte die vollständige Nachricht nach rund 6,6 Sekunden.
+
+Damit waren Anmeldung, Routing, Datenheader, Rate-3/4-Blöcke, CRC und Inbox
+funktionsfähig. Der Fehler lag in der Art der erzeugten Quittung.
+
+== Referenz zwischen zwei realen FuG
+
+Die private SDS `10001 -> 10003` wurde am Ziel angezeigt und am Sender als
+bestätigt gemeldet. Auf dem Homebrew-Weg erschien kein einzelner
+DMR-Response-Header. Stattdessen begann das Ziel-FuG ungefähr 570 ms nach dem
+letzten Datenblock eine vollständige private Gegen-SDS `10003 -> 10001`.
+
+Der dekodierte IPv4/UDP/TMS-Inhalt dieses Zustellberichts lautet:
+
+[source,text]
+----
+4500002100130000401114960C0027130C0027110FA70FA7000DBA5E0003BF0001
+----
+
+Die TMS-Nutzlast ist exakt `00 03 BF 00 01`. Der Bericht verwendet einen
+bestätigten Datenheader mit drei Rate-3/4-Blöcken und elf Pad-Bytes. Vor dem
+Header wurden beim ersten Versuch fünf CSBK-Preambles beobachtet. Die einzelnen
+Preambles trugen eigene Stream-IDs; Header und Datenblöcke teilten sich eine
+gemeinsame Stream-ID.
+
+== Abgeleitete Umsetzung
+
+Virtuelle FuG erzeugen für eine gültige bestätigte Text-SDS nun nach ungefähr
+500 ms denselben vollständigen TMS-Zustellbericht. Sender und Echo-Dienst
+erkennen ihn anhand von Quelle, Ziel und TMS-Nutzlast. Der frühere
+DMR-Response-Header bleibt als Kompatibilitäts-Fallback erhalten. Zustellberichte
+werden weder als Text angezeigt noch erneut quittiert.
+
+Ausgehende bestätigte Emulatortransaktionen verwenden fünf Preambles. Die REPL
+wartet zwischen Versuchen 2,5 Sekunden auf den Bericht; der serverseitige
+Echo-Dienst wartet drei Sekunden.
+
+== Offene Hardwareabnahme
+
+Für den Rückweg `10002 -> 10003` war die virtuelle ID `10002` im realen Ziel-FuG
+nicht als digitaler Kontakt hinterlegt; die Nachricht wurde über Manual Dial
+dennoch angezeigt, aber nicht quittiert. Vor der Wiederholung wird `10002` als
+Kontakt angelegt. Danach sind drei Punkte zu prüfen:
+
+. `10003 -> 10002` wird am realen Sender als zugestellt angezeigt.
+. `10002 -> 10003` liefert im Playground den Status `Acknowledged`.
+. `sds send radio1 service 990099 "ECHO Test"` empfängt die Echo-Antwort und
+  quittiert sie so, dass der Echo-Dienst keinen Retry startet.

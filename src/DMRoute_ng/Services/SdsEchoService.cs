@@ -21,10 +21,11 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
     private const int DatagramBufferBytes = 384;
     private const int FragmentBufferBytes = 384;
     private const int MaximumAttempts = 3;
+    private const int PreambleCount = 5;
     private static readonly TimeSpan DuplicateWindow = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan ReplyDelay = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan BurstDelay = TimeSpan.FromMilliseconds(60);
-    private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(3);
 
     private sealed class RequestSlot
     {
@@ -70,6 +71,7 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
     private int _currentTargetId;
     private int _responseState;
     private int _streamSequence;
+    private int _sendSequence;
     private int _packetSequence;
     private long _droppedRequests;
     private long _acceptedRequests;
@@ -161,6 +163,14 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
         }
     }
 
+    public void HandleDeliveryReport(in SdsDeliveryReportEvent report)
+    {
+        var target = Volatile.Read(ref _currentTargetId);
+        if (target == 0 || report.SourceId != target || report.DestinationId != DestinationId ||
+            report.IsGroupCall || report.Status != TmsDeliveryStatus.Delivered) return;
+        Volatile.Write(ref _responseState, 1);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await foreach (var slotIndex in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
@@ -213,10 +223,10 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
         BinaryPrimitives.WriteUInt32LittleEndian(fragment[crcOffset..], crc);
         var fragmentLength = crcOffset + 4;
 
-        var streamId = unchecked((uint)Interlocked.Increment(ref _streamSequence));
-        var sendSequence = (byte)(streamId & 0x07);
+        var sendSequence = unchecked((byte)((Interlocked.Increment(ref _sendSequence) - 1) & 0x07));
         for (var attempt = 0; attempt < MaximumAttempts; attempt++)
         {
+            var streamId = unchecked((uint)Interlocked.Increment(ref _streamSequence));
             Volatile.Write(ref _currentTargetId, slot.SourceId);
             Volatile.Write(ref _responseState, 0);
             SendTransaction(fragment[..fragmentLength], (byte)blocks, (byte)pad, sendSequence,
@@ -253,10 +263,12 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
     {
         Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
         Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
-        for (var preamble = 0; preamble < 4; preamble++)
+        for (var preamble = 0; preamble < PreambleCount; preamble++)
         {
-            DmrBurstWriter.WriteCsbkPreamble(burst, DestinationId, targetId, (byte)(blocks + 4 - preamble), colorCode);
-            SendBurst(packet, burst, hotspotId, targetId, 0x03, streamId, endpoint);
+            DmrBurstWriter.WriteCsbkPreamble(
+                burst, DestinationId, targetId, (byte)(blocks + PreambleCount - preamble), colorCode);
+            SendBurst(packet, burst, hotspotId, targetId, 0x03,
+                unchecked((uint)Interlocked.Increment(ref _streamSequence)), endpoint);
             Wait(BurstDelay, cancellationToken);
         }
 

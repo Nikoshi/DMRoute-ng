@@ -1,4 +1,4 @@
-.PHONY: help run test add rm list restore clean distclean edit docker docker.tar docs docs-check docs-html docs-pdf
+.PHONY: help run playground test add rm list restore clean distclean edit docker docker.tar docs docs-check docs-html docs-pdf
 
 MAKEFLAGS += --silent
 
@@ -24,6 +24,7 @@ help:
 	@echo "---------------+------------------------------------------"
 	@echo "help           | Shows this help"
 	@echo "run            | Runs the project"
+	@echo "playground     | Runs the interactive emulator playground"
 	@echo "test           | Runs the tests"
 	@echo "docs           | Builds and validates HTML/PDF documentation"
 	@echo "docs-check     | Validates every AsciiDoc source"
@@ -43,6 +44,9 @@ help:
 
 run: $(BINARY)
 	dotnet run --project $(PROJECT_PATH) -c $(PROJECT_CONFIG) --no-build
+
+playground:
+	dotnet run --project tools/DMRoute_ng.Playground/DMRoute_ng.Playground.csproj -c $(PROJECT_CONFIG) -- $(PLAYGROUND_ARGS)
 
 test: $(BINARY)
 	dotnet test -c $(PROJECT_CONFIG) --no-build
