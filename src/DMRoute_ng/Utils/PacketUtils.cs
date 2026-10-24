@@ -2,6 +2,14 @@ using System.Buffers.Binary;
 
 namespace DMRoute_ng.Utils;
 
+/// <summary>
+/// Kodiert die festen Homebrew-Anmelde- und Keepalive-Pakete des Masters.
+/// </summary>
+/// <remarks>
+/// Die <c>TryWrite*</c>-Varianten sind für Hot Paths vorgesehen und schreiben in
+/// aufruferverwaltete Puffer. Die <c>Build*</c>-Varianten sind komfortable,
+/// allokierende Wrapper für Start- und Testpfade.
+/// </remarks>
 public static class PacketUtils
 {
     public const int RptAckLength = 10;
@@ -10,19 +18,19 @@ public static class PacketUtils
     public const int MstNakLength = 10;
     public const int MstPongLength = 11;
 
-    // HB Protocol
+    // Homebrew-Protokollkennungen, wie sie unverändert auf dem UDP-Wire stehen.
     public static ReadOnlySpan<byte> RptlHeader => "RPTL"u8;
     public static ReadOnlySpan<byte> RptkHeader => "RPTK"u8;
     public static ReadOnlySpan<byte> RptPingHeader => "RPTPING"u8;
     public static ReadOnlySpan<byte> DmrdHeader => "DMRD"u8;
     public static ReadOnlySpan<byte> DmrcHeader => "DMRC"u8;
     public static ReadOnlySpan<byte> RptcHeader => "RPTC"u8;
-    
-    // Master Discovery Protocol
-    public static ReadOnlySpan<byte> DmbdHeader => "DMBD"u8; // DMR Broadcast Discovery
-    public static ReadOnlySpan<byte> DmbcHeader => "DMBC"u8; // DMR Broadcast Challenge Response
-    
-    // Master Challenge (Antwort auf RPTL) im korrekten RPTACK-Format
+
+    // DMRoute-ng-Master-Discovery: Broadcast Discovery und Challenge Response.
+    public static ReadOnlySpan<byte> DmbdHeader => "DMBD"u8;
+    public static ReadOnlySpan<byte> DmbcHeader => "DMBC"u8;
+
+    /// <summary>Erzeugt die RPTACK-Challenge als neues Array.</summary>
     public static byte[] BuildRptAck(uint salt)
     {
         var packet = new byte[RptAckLength];
@@ -38,7 +46,7 @@ public static class PacketUtils
         written = RptAckLength;
         return true;
     }
-    
+
     public static byte[] BuildMstc(int repeaterId, uint salt)
     {
         var packet = new byte[MstcLength];
@@ -56,7 +64,7 @@ public static class PacketUtils
         return true;
     }
 
-    // Master Ack (Antwort auf erfolgreichen RPTK)
+    /// <summary>Erzeugt die Bestätigung einer erfolgreichen RPTK-Anmeldung.</summary>
     public static byte[] BuildMsta(int repeaterId)
     {
         var packet = new byte[MstaLength];
@@ -73,7 +81,7 @@ public static class PacketUtils
         return true;
     }
 
-    // Master NAK (Passwort falsch oder Repeater unbekannt)
+    /// <summary>Erzeugt die Ablehnung einer fehlgeschlagenen Anmeldung.</summary>
     public static byte[] BuildMstNak(int repeaterId)
     {
         var packet = new byte[MstNakLength];
@@ -90,7 +98,7 @@ public static class PacketUtils
         return true;
     }
 
-    // Master Pong (Antwort auf RPTPING)
+    /// <summary>Erzeugt die Antwort auf ein RPTPING.</summary>
     public static byte[] BuildMstPong(int repeaterId)
     {
         var packet = new byte[MstPongLength];

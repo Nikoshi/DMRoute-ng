@@ -23,30 +23,36 @@ public sealed class MasterRegistry(ILogger<MasterRegistry> logger) : BackgroundS
     private readonly ConcurrentDictionary<int, MasterPeer> _peers = new();
     private volatile MasterPeer[] _routingSnapshot = [];
 
-    // Gibt true zurück, wenn die Zone neu ist
+    /// <summary>
+    /// Aktualisiert Endpunkt und Aktivitätszeit einer Zone und gibt <see langword="true"/>
+    /// zurück, wenn die Zone neu aufgenommen wurde.
+    /// </summary>
     public bool AddOrUpdate(int zoneId, Ipv4Endpoint dataEndPoint)
     {
         if (_peers.TryGetValue(zoneId, out var peer))
         {
             peer.DataEndPoint = dataEndPoint;
             Volatile.Write(ref peer.LastSeenTicks, DateTime.UtcNow.Ticks);
-            return false; 
+            return false;
         }
-        
+
         _peers.TryAdd(zoneId, new MasterPeer(zoneId, dataEndPoint));
         RefreshRoutingSnapshot();
-        return true; 
+        return true;
     }
 
     public bool TryGet(int zoneId, out MasterPeer peer) => _peers.TryGetValue(zoneId, out peer!);
-    
-    // Legacy für Debugging / Status-Websites etc.
+
+    /// <summary>
+    /// Liefert die live verwendete Peer-Tabelle für Diagnosezwecke.
+    /// Aufrufer dürfen sie nicht verändern.
+    /// </summary>
     public ConcurrentDictionary<int, MasterPeer> GetAll() => _peers;
 
     /// <summary>
-    /// Zero-Allocation Methode für Talkgroup 1 (Global).
-    /// Füllt den übergebenen Span mit allen aktiven Endpoints und gibt die Anzahl zurück.
+    /// Kopiert aktive Master-Endpunkte ohne Zwischenallokation in den Zielspan.
     /// </summary>
+    /// <returns>Anzahl der geschriebenen Endpunkte; überzählige Peers werden ausgelassen.</returns>
     public int GetActiveEndpoints(Span<Ipv4Endpoint> buffer)
     {
         var count = 0;
@@ -58,6 +64,10 @@ public sealed class MasterRegistry(ILogger<MasterRegistry> logger) : BackgroundS
         return count;
     }
 
+    /// <summary>
+    /// Liefert den unveränderlichen Routing-Snapshot. Der Span darf die synchrone
+    /// Verarbeitung des Aufrufers nicht verlassen.
+    /// </summary>
     public ReadOnlySpan<MasterPeer> GetRoutingSnapshot() => _routingSnapshot;
 
     private void RefreshRoutingSnapshot()
@@ -76,10 +86,10 @@ public sealed class MasterRegistry(ILogger<MasterRegistry> logger) : BackgroundS
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
-        
+
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            // 90 Sekunden Timeout (3 verpasste Beacons)
+            // 90 Sekunden entsprechen drei ausgebliebenen Discovery-Beacons.
             long cutoffTicks = DateTime.UtcNow.AddSeconds(-90).Ticks;
 
             foreach (var kvp in _peers)

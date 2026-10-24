@@ -11,7 +11,10 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
     private readonly ConcurrentDictionary<int, Repeater> _repeaters = new();
     private volatile Repeater[] _routingSnapshot = [];
 
-    // Dynamisches Whitelisting; nur aus dem RPTL-Anmeldepfad aufrufen.
+    /// <summary>
+    /// Sucht einen Hotspot oder legt ihn während der RPTL-Anmeldung an, sofern seine
+    /// ID zur lokalen Zone gehört.
+    /// </summary>
     public bool TryGet(int repeaterId, out Repeater repeater)
     {
         if (_repeaters.TryGetValue(repeaterId, out var existing))
@@ -20,15 +23,13 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
             return true;
         }
 
-        // Dynamisches Whitelisting: Gehört die ID mathematisch zu unserer Zone?
-        // Beispiel: Zone 101 -> Erlaubt sind IDs wie 1010001 (1010001 / 10000 = 101)
+        // Die führenden Ziffern der siebenstelligen Hotspot-ID bilden die Zone.
         if (repeaterId / 10000 == masterZoneId)
         {
-            // Individueller PSK: Master-PSK + Repeater-ID (z. B. "s3cr37w0rd1000001")
-            // Die String-Allokation passiert exakt 1x pro neuem Repeater und belastet den Hot-Path nicht.
+            // Der individuelle PSK wird einmalig bei der Anmeldung erzeugt, außerhalb
+            // der Paketverarbeitung nach erfolgreichem Login.
             var uniquePsk = $"{sharedPsk}{repeaterId}";
-            
-            // Allokation findet exakt 1x pro neuem, legitimen Hotspot statt
+
             repeater = new Repeater(repeaterId, uniquePsk, RepeaterState.Disconnected, null);
             _repeaters.TryAdd(repeaterId, repeater);
             return true;
@@ -41,9 +42,16 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
     public bool TryGetExisting(int repeaterId, out Repeater repeater) =>
         _repeaters.TryGetValue(repeaterId, out repeater!);
 
-    // Liefert das Dictionary zurück, damit Caller den Struct-Enumerator (Zero-Alloc) nutzen können
+    /// <summary>
+    /// Liefert die live verwendete Hotspot-Tabelle für Diagnosezwecke.
+    /// Aufrufer dürfen sie nicht verändern.
+    /// </summary>
     public ConcurrentDictionary<int, Repeater> GetAll() => _repeaters;
 
+    /// <summary>
+    /// Liefert den Routing-Snapshot ohne Allokation. Der Span darf keinen
+    /// <see langword="await"/>-Übergang überschreiten.
+    /// </summary>
     public ReadOnlySpan<Repeater> GetRoutingSnapshot() => _routingSnapshot;
 
     public void RefreshRoutingSnapshot()
@@ -81,12 +89,12 @@ public sealed class RepeaterRegistry(ILogger<RepeaterRegistry> logger, int maste
         }
 
     }
-    
+
     // ReSharper disable once CognitiveComplexity
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-        
+
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             DisconnectIdleRepeaters(DateTime.UtcNow.Ticks);

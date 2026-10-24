@@ -40,12 +40,26 @@ public readonly record struct MeshControlMessage(
     MeshRouteQueryScope Scope = MeshRouteQueryScope.Home,
     MeshRouteStatus Status = MeshRouteStatus.NotFound);
 
+/// <summary>
+/// Kodiert und prüft authentisierte Kontrollnachrichten zwischen DMRoute-ng-Mastern.
+/// </summary>
+/// <remarks>
+/// Das Wire-Format ist exakt <see cref="PacketLength"/> Byte lang. Die ersten 64 Byte
+/// enthalten Version, Typ, Adressen und Zeitwerte; die letzten 32 Byte enthalten den
+/// HMAC-SHA-256 über den Nutzteil. Empfangene Pakete außerhalb des erlaubten
+/// Zeitfensters werden auch bei gültigem HMAC verworfen.
+/// </remarks>
 public static class MeshControlProtocol
 {
+    /// <summary>Feste Länge einer Kontrollnachricht einschließlich HMAC.</summary>
     public const int PacketLength = 96;
     private const byte Version = 1;
     private static readonly TimeSpan MaximumClockSkew = TimeSpan.FromSeconds(30);
 
+    /// <summary>Schreibt eine vollständige Kontrollnachricht in den Zielpuffer.</summary>
+    /// <exception cref="ArgumentException">
+    /// Der Zielpuffer ist kleiner als <see cref="PacketLength"/>.
+    /// </exception>
     public static void Write(
         Span<byte> destination,
         in MeshControlMessage message,
@@ -74,6 +88,10 @@ public static class MeshControlProtocol
         HMACSHA256.HashData(meshKey, destination[..64], destination[64..96]);
     }
 
+    /// <summary>
+    /// Prüft Länge, Kennung, Version, HMAC, Zeitfenster und Wertebereiche und dekodiert
+    /// anschließend die Nachricht.
+    /// </summary>
     public static bool TryRead(
         ReadOnlySpan<byte> packet,
         ReadOnlySpan<byte> meshKey,

@@ -8,6 +8,10 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Routing;
 
+/// <summary>
+/// Verarbeitet ein DMR-Datenframe synchron. Der Paketspan ist nur während des
+/// Rückrufs gültig und muss bei dauerhafter Nutzung kopiert werden.
+/// </summary>
 public delegate void DmrDataFrameHandler(ReadOnlySpan<byte> packet);
 public delegate void DmrCallEventHandler(in DmrCallEvent callEvent);
 public delegate void DmrUnknownFrameHandler(ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks);
@@ -70,6 +74,15 @@ public readonly struct ActiveCallSnapshot(
     public long StartedAtTicks { get; } = startedAtTicks;
 }
 
+/// <summary>
+/// Prüft die Herkunft eingehender DMRD-Pakete, lernt lokale Teilnehmerpfade und
+/// leitet Gruppen-, Privat- und Dienstdaten an lokale oder entfernte Ziele weiter.
+/// </summary>
+/// <remarks>
+/// Die synchrone Paketverarbeitung ist ein Hot Path. Zustände sind vorab begrenzt;
+/// bei voller Kapazität wird weitergeroutet und nur zusätzlicher Beobachtungszustand
+/// verworfen.
+/// </remarks>
 public sealed partial class MicroSubnetRouter : IDisposable
 {
     private readonly struct LocalDeviceRoute(int hotspotId, long lastSeenTicks)
@@ -170,6 +183,10 @@ public sealed partial class MicroSubnetRouter : IDisposable
         _cleanupTimer = new Timer(CleanupStaleCalls, null, 2000, 2000);
     }
 
+    /// <summary>
+    /// Verarbeitet und routet ein DMRD-Datagramm synchron. Weder Router noch Sender
+    /// dürfen den geliehenen Paketspan über den Aufruf hinaus speichern.
+    /// </summary>
     public void RouteDmrd(ReadOnlySpan<byte> packet, Ipv4Endpoint remoteEndPoint, IDmrSender sender)
     {
         if (packet.Length < 23) return;
@@ -303,242 +320,9 @@ public sealed partial class MicroSubnetRouter : IDisposable
         }
     }
 
-    private void LearnLocalRoute(int sourceId, int repeaterId)
-    {
-        var route = new LocalDeviceRoute(repeaterId, DateTime.UtcNow.Ticks);
-        lock (_localRoutesLock)
-        {
-            if (_localDeviceRouting.TryGetValue(sourceId, out _))
-            {
-                _localDeviceRouting[sourceId] = route;
-                return;
-            }
-
-            if (_localDeviceRouting.Count >= _maxLocalDeviceRoutes)
-            {
-                Interlocked.Increment(ref _droppedLocalRouteStates);
-                return;
-            }
-            _localDeviceRouting.Add(sourceId, route);
-        }
-    }
-
+    /// <summary>Ermittelt einen aktuell erreichbaren lokalen Heim- oder Gastteilnehmer.</summary>
     public bool TryGetAnyLocalTarget(int deviceId, out RadioTargetRoute route) =>
         TryGetLocalGuestTarget(deviceId, out route) || TryGetLocalHomeTarget(deviceId, out route);
-
-    public bool TryGetHomeRouteCandidate(int deviceId, out int routeZone, out long lastSeenTicks)
-    {
-        routeZone = 0;
-        lastSeenTicks = 0;
-        if (deviceId / 100 != _masterZoneId) return false;
-
-        if (TryGetLocalHomeTarget(deviceId, out var local))
-        {
-            routeZone = _masterZoneId;
-            lastSeenTicks = local.LastSeenTicks;
-        }
-
-        if (_roamingRegistry.TryGetRoamedDevice(deviceId, out var roamingZone, out var roamingSeen) &&
-            roamingSeen > lastSeenTicks)
-        {
-            routeZone = roamingZone;
-            lastSeenTicks = roamingSeen;
-        }
-
-        return routeZone != 0;
-    }
-
-    private bool TryGetLocalHomeTarget(int deviceId, out RadioTargetRoute route)
-    {
-        LocalDeviceRoute state;
-        lock (_localRoutesLock)
-        {
-            if (!_localDeviceRouting.TryGetValue(deviceId, out state) ||
-                state.LastSeenTicks < DateTime.UtcNow.AddMinutes(-15).Ticks)
-            {
-                route = default;
-                return false;
-            }
-        }
-
-        if (_registry.TryGetExisting(state.HotspotId, out var repeater) &&
-            repeater.State == RepeaterState.LoggedIn && repeater.EndPoint is { } endpoint)
-        {
-            route = new RadioTargetRoute(
-                state.HotspotId, endpoint, (byte)(repeater.Configuration?.ColorCode ?? 1), state.LastSeenTicks);
-            return true;
-        }
-
-        route = default;
-        return false;
-    }
-
-    private bool TryGetLocalGuestTarget(int deviceId, out RadioTargetRoute route)
-    {
-        if (_roamingRegistry.TryGetLocalGuestRoute(deviceId, out var hotspotId, out var endpoint, out var lastSeen) &&
-            _registry.TryGetExisting(hotspotId, out var repeater) && repeater.State == RepeaterState.LoggedIn &&
-            repeater.EndPoint == endpoint)
-        {
-            route = new RadioTargetRoute(
-                hotspotId, endpoint, (byte)(repeater.Configuration?.ColorCode ?? 1), lastSeen);
-            return true;
-        }
-
-        route = default;
-        return false;
-    }
-
-    public int CopyActiveCalls(Span<ActiveCallSnapshot> destination)
-    {
-        var count = 0;
-        lock (_activeCallsLock)
-        {
-            foreach (var pair in _activeCalls)
-            {
-                if (count == destination.Length) break;
-                var state = pair.Value;
-                destination[count++] = new ActiveCallSnapshot(
-                    pair.Key,
-                    state.DstId,
-                    state.HotspotId,
-                    state.IsGroupCall,
-                    state.StartTicks);
-            }
-        }
-        return count;
-    }
-
-    private void HandleSignaling(
-        ReadOnlySpan<byte> packet,
-        int srcId,
-        int dstId,
-        int hotspotId,
-        bool isGroupCall,
-        byte dataType)
-    {
-        var now = DateTime.UtcNow.Ticks;
-        var publishStart = false;
-
-        switch (dataType)
-        {
-            case 0x01:
-                lock (_activeCallsLock)
-                {
-                    if (_activeCalls.TryGetValue(srcId, out var existing))
-                    {
-                        _activeCalls[srcId] = new CallState(
-                            dstId,
-                            hotspotId,
-                            isGroupCall,
-                            existing.StartTicks,
-                            now);
-                    }
-                    else if (_activeCalls.Count < _maxActiveCalls)
-                    {
-                        _activeCalls.Add(srcId, new CallState(dstId, hotspotId, isGroupCall, now, now));
-                        publishStart = true;
-                    }
-                    else
-                    {
-                        Interlocked.Increment(ref _droppedCallStates);
-                    }
-                }
-
-                if (publishStart)
-                {
-                    LogCallStart(_logger, isGroupCall ? "GroupCall" : "PrivateCall", srcId, dstId);
-                    var callEvent = new DmrCallEvent(
-                        srcId,
-                        dstId,
-                        hotspotId,
-                        isGroupCall,
-                        DmrCallEventType.Started,
-                        now);
-                    OnCallEvent?.Invoke(in callEvent);
-                }
-                break;
-            case 0x02:
-                lock (_activeCallsLock)
-                {
-                    if (_activeCalls.TryGetValue(srcId, out var active))
-                        _activeCalls[srcId] = new CallState(
-                            active.DstId,
-                            active.HotspotId,
-                            active.IsGroupCall,
-                            active.StartTicks,
-                            now,
-                            now,
-                            true);
-                }
-                break;
-            case 0x03:
-                LogCsbk(_logger, srcId, dstId);
-                break;
-            case <= 0x08:
-                lock (_activeCallsLock)
-                {
-                    if (_activeCalls.TryGetValue(srcId, out var current))
-                        _activeCalls[srcId] = new CallState(
-                            current.DstId,
-                            current.HotspotId,
-                            current.IsGroupCall,
-                            current.StartTicks,
-                            now,
-                            current.TerminationTicks,
-                            current.PendingTermination);
-                }
-                break;
-            default:
-                OnUnknownFrameReceived?.Invoke(packet, srcId, hotspotId, dataType, now);
-                break;
-        }
-    }
-
-    private void CleanupStaleCalls(object? state)
-    {
-        var currentTicks = DateTime.UtcNow.Ticks;
-        var count = 0;
-
-        lock (_activeCallsLock)
-        {
-            foreach (var pair in _activeCalls)
-            {
-                var call = pair.Value;
-                var elapsed = currentTicks - call.LastFrameTicks;
-                var eventType = call.PendingTermination && elapsed > TimeSpan.FromMilliseconds(1500).Ticks
-                    ? (byte)0x02
-                    : !call.PendingTermination && elapsed > TimeSpan.FromSeconds(3).Ticks
-                        ? (byte)0xFE
-                        : (byte)0;
-                if (eventType != 0) _expiredCalls[count++] = new ExpiredCall(pair.Key, call, eventType);
-            }
-
-            for (var i = 0; i < count; i++) _activeCalls.Remove(_expiredCalls[i].SourceId);
-        }
-
-        for (var i = 0; i < count; i++)
-        {
-            var expired = _expiredCalls[i];
-            var endedAtTicks = expired.EventType == 0x02
-                ? expired.State.TerminationTicks
-                : expired.State.LastFrameTicks;
-            var durationTicks = Math.Max(0, endedAtTicks - expired.State.StartTicks);
-            if (expired.EventType == 0x02)
-                LogCallEnd(_logger, expired.State.IsGroupCall ? "GroupCall" : "PrivateCall", expired.SourceId, expired.State.DstId);
-            else
-                LogCallTimeout(_logger, expired.SourceId, expired.State.DstId);
-            var callEvent = new DmrCallEvent(
-                expired.SourceId,
-                expired.State.DstId,
-                expired.State.HotspotId,
-                expired.State.IsGroupCall,
-                expired.EventType == 0x02 ? DmrCallEventType.Ended : DmrCallEventType.TimedOut,
-                expired.EventType == 0x02 ? endedAtTicks : currentTicks,
-                durationTicks);
-            OnCallEvent?.Invoke(in callEvent);
-            _expiredCalls[i] = default;
-        }
-    }
 
     public void Dispose() => _cleanupTimer.Dispose();
 

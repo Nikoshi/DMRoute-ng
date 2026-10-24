@@ -13,6 +13,15 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Services;
 
+/// <summary>
+/// Beantwortet gültige Gruppen-SDS an den lokalen Echo-Dienst mit einer bestätigten
+/// privaten SDS an den Absender.
+/// </summary>
+/// <remarks>
+/// Empfangsslots, Duplikatfenster und Sendewarteschlange sind vorab begrenzt. Die
+/// Funktransaktionen laufen seriell im Hintergrund; der synchrone Empfangspfad kopiert
+/// nur akzeptierte Nutzdaten in einen reservierten Slot.
+/// </remarks>
 public sealed partial class SdsEchoService : BackgroundService, ISdsService
 {
     private const int MaxEchoCharacters = 120;
@@ -114,6 +123,10 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
     public long SuccessfulReplies => Interlocked.Read(ref _successfulReplies);
     public long FailedReplies => Interlocked.Read(ref _failedReplies);
 
+    /// <summary>
+    /// Prüft und übernimmt einen Echo-Befehl. Der geliehene Textspan wird während des
+    /// Aufrufs ausgewertet und bei Annahme in vorab reservierten Besitzspeicher kopiert.
+    /// </summary>
     public void HandleMessage(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes)
     {
         if (!_enabled || message.DestinationId != DestinationId || !message.IsGroupCall ||
@@ -163,6 +176,7 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
         }
     }
 
+    /// <summary>Ordnet einen positiven TMS-Zustellbericht der laufenden Antwort zu.</summary>
     public void HandleDeliveryReport(in SdsDeliveryReportEvent report)
     {
         var target = Volatile.Read(ref _currentTargetId);
@@ -202,219 +216,6 @@ public sealed partial class SdsEchoService : BackgroundService, ISdsService
                 slot.Release();
             }
         }
-    }
-
-    private bool SendReply(
-        RequestSlot slot, Ipv4Endpoint endpoint, byte colorCode, CancellationToken cancellationToken)
-    {
-        Span<byte> reply = stackalloc byte[ReplyBufferBytes];
-        var replyLength = BuildReplyText(slot, reply);
-        Span<byte> datagram = stackalloc byte[DatagramBufferBytes];
-        if (!TmsMessageWriter.TryWriteUtf16LittleEndian(
-                datagram, DestinationId, slot.SourceId, reply[..replyLength], out var datagramLength)) return false;
-
-        Span<byte> fragment = stackalloc byte[FragmentBufferBytes];
-        var blocks = (datagramLength + 4 + 15) / 16;
-        var pad = blocks * 16 - datagramLength - 4;
-        datagram[..datagramLength].CopyTo(fragment);
-        fragment.Slice(datagramLength, pad).Clear();
-        var crcOffset = datagramLength + pad;
-        var crc = DmrCrc.MessageCrc32(fragment[..crcOffset]);
-        BinaryPrimitives.WriteUInt32LittleEndian(fragment[crcOffset..], crc);
-        var fragmentLength = crcOffset + 4;
-
-        var sendSequence = unchecked((byte)((Interlocked.Increment(ref _sendSequence) - 1) & 0x07));
-        for (var attempt = 0; attempt < MaximumAttempts; attempt++)
-        {
-            var streamId = unchecked((uint)Interlocked.Increment(ref _streamSequence));
-            Volatile.Write(ref _currentTargetId, slot.SourceId);
-            Volatile.Write(ref _responseState, 0);
-            SendTransaction(fragment[..fragmentLength], (byte)blocks, (byte)pad, sendSequence,
-                slot.HotspotId, slot.SourceId, endpoint, colorCode, streamId, cancellationToken);
-
-            var deadline = _timeProvider.GetUtcNow() + ResponseTimeout;
-            while (_timeProvider.GetUtcNow() < deadline)
-            {
-                var response = Volatile.Read(ref _responseState);
-                if (response == 1)
-                {
-                    Volatile.Write(ref _currentTargetId, 0);
-                    return true;
-                }
-                if (response == 2) break;
-                Wait(TimeSpan.FromMilliseconds(20), cancellationToken);
-            }
-        }
-        Volatile.Write(ref _currentTargetId, 0);
-        return false;
-    }
-
-    private void SendTransaction(
-        ReadOnlySpan<byte> fragment,
-        byte blocks,
-        byte pad,
-        byte sendSequence,
-        int hotspotId,
-        int targetId,
-        Ipv4Endpoint endpoint,
-        byte colorCode,
-        uint streamId,
-        CancellationToken cancellationToken)
-    {
-        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
-        Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
-        for (var preamble = 0; preamble < PreambleCount; preamble++)
-        {
-            DmrBurstWriter.WriteCsbkPreamble(
-                burst, DestinationId, targetId, (byte)(blocks + PreambleCount - preamble), colorCode);
-            SendBurst(packet, burst, hotspotId, targetId, 0x03,
-                unchecked((uint)Interlocked.Increment(ref _streamSequence)), endpoint);
-            Wait(BurstDelay, cancellationToken);
-        }
-
-        DmrBurstWriter.WriteConfirmedDataHeader(
-            burst, DestinationId, targetId, blocks, pad, sendSequence, colorCode);
-        SendBurst(packet, burst, hotspotId, targetId, 0x06, streamId, endpoint);
-        Wait(BurstDelay, cancellationToken);
-
-        for (byte block = 0; block < blocks; block++)
-        {
-            DmrBurstWriter.WriteConfirmedRateThreeQuarterBlock(
-                burst, fragment.Slice(block * 16, 16), block, colorCode);
-            SendBurst(packet, burst, hotspotId, targetId, 0x08, streamId, endpoint);
-            if (block + 1 < blocks)
-                Wait(BurstDelay, cancellationToken);
-        }
-    }
-
-    private static void Wait(TimeSpan delay, CancellationToken cancellationToken)
-    {
-        if (cancellationToken.WaitHandle.WaitOne(delay)) cancellationToken.ThrowIfCancellationRequested();
-    }
-
-    private void SendBurst(
-        Span<byte> packet,
-        ReadOnlySpan<byte> burst,
-        int hotspotId,
-        int targetId,
-        byte dataType,
-        uint streamId,
-        Ipv4Endpoint endpoint)
-    {
-        var packetSequence = unchecked((byte)Interlocked.Increment(ref _packetSequence));
-        DmrBurstWriter.WriteDmrd(packet, burst, packetSequence, DestinationId, targetId, hotspotId, dataType, streamId);
-        _sender.SendTo(packet, endpoint);
-    }
-
-    private void HandleResponseFrame(ReadOnlySpan<byte> packet)
-    {
-        var target = Volatile.Read(ref _currentTargetId);
-        if (target == 0 || !DmrBurstWriter.TryReadConfirmedResponse(packet, target, DestinationId, out var acknowledged))
-            return;
-        Volatile.Write(ref _responseState, acknowledged ? 1 : 2);
-    }
-
-    private bool TryGetTarget(int hotspotId, out Ipv4Endpoint endpoint, out byte colorCode)
-    {
-        if (_repeaters.TryGetExisting(hotspotId, out var repeater) &&
-            repeater.State == RepeaterState.LoggedIn && repeater.EndPoint is { } target)
-        {
-            endpoint = target;
-            colorCode = (byte)(repeater.Configuration?.ColorCode ?? 1);
-            return true;
-        }
-        endpoint = default;
-        colorCode = 1;
-        return false;
-    }
-
-    private static int BuildReplyText(RequestSlot slot, Span<byte> destination)
-    {
-        var offset = 0;
-        if (slot.TooLong)
-            AppendAscii("ERROR text too long (max 120) | RX "u8, destination, ref offset);
-        else
-        {
-            AppendAscii("ECHO "u8, destination, ref offset);
-            slot.Text.AsSpan(0, slot.TextLength).CopyTo(destination[offset..]);
-            offset += slot.TextLength;
-            AppendAscii(" | RX "u8, destination, ref offset);
-        }
-
-        Span<byte> duration = stackalloc byte[20];
-        var milliseconds = Math.Max(0, slot.ReceiveDurationTicks / TimeSpan.TicksPerMillisecond);
-        Utf8Formatter.TryFormat(milliseconds, duration, out var durationLength);
-        AppendAscii(duration[..durationLength], destination, ref offset);
-        AppendAscii(" ms"u8, destination, ref offset);
-        return offset;
-    }
-
-    private static void AppendAscii(ReadOnlySpan<byte> ascii, Span<byte> destination, ref int offset)
-    {
-        foreach (var value in ascii)
-        {
-            destination[offset++] = value;
-            destination[offset++] = 0;
-        }
-    }
-
-    private static bool StartsWithEcho(ReadOnlySpan<byte> text) =>
-        text.Length >= 10 && text[0] == (byte)'E' && text[1] == 0 &&
-        text[2] == (byte)'C' && text[3] == 0 && text[4] == (byte)'H' && text[5] == 0 &&
-        text[6] == (byte)'O' && text[7] == 0 && text[8] == (byte)' ' && text[9] == 0;
-
-    private static ReadOnlySpan<byte> TrimTransportWhitespace(ReadOnlySpan<byte> text)
-    {
-        if ((text.Length & 1) != 0) text = text[..^1];
-        while (text.Length >= 2 && ReadCodeUnit(text) is '\0' or '\r' or '\n') text = text[2..];
-        while (text.Length >= 2 && ReadCodeUnit(text[^2..]) is '\0' or '\r' or '\n') text = text[..^2];
-        return text;
-    }
-
-    private static bool IsWhiteSpace(ReadOnlySpan<byte> text)
-    {
-        if (text.IsEmpty) return true;
-        for (var offset = 0; offset + 1 < text.Length; offset += 2)
-        {
-            if (ReadCodeUnit(text[offset..]) is not ('\0' or ' ' or '\t' or '\r' or '\n')) return false;
-        }
-        return true;
-    }
-
-    private static char ReadCodeUnit(ReadOnlySpan<byte> text) => (char)(text[0] | (text[1] << 8));
-
-    private static ulong Hash(ReadOnlySpan<byte> text)
-    {
-        const ulong offsetBasis = 14695981039346656037UL;
-        const ulong prime = 1099511628211UL;
-        var hash = offsetBasis;
-        foreach (var value in text) hash = (hash ^ value) * prime;
-        return hash;
-    }
-
-    private bool IsDuplicate(int sourceId, int textLength, ulong hash, long now)
-    {
-        var cutoff = now - DuplicateWindow.Ticks;
-        for (var i = 0; i < _duplicates.Length; i++)
-        {
-            ref var entry = ref _duplicates[i];
-            if (entry.SeenAtTicks >= cutoff && entry.SourceId == sourceId &&
-                entry.TextLength == textLength && entry.Hash == hash) return true;
-        }
-        return false;
-    }
-
-    private void Remember(int sourceId, int textLength, ulong hash, long now)
-    {
-        ref var entry = ref _duplicates[_nextDuplicateSlot];
-        entry = new DuplicateEntry { SourceId = sourceId, TextLength = textLength, Hash = hash, SeenAtTicks = now };
-        _nextDuplicateSlot = (_nextDuplicateSlot + 1) % _duplicates.Length;
-    }
-
-    private int RentSlot()
-    {
-        for (var i = 0; i < _slots.Length; i++) if (_slots[i].TryRent()) return i;
-        return -1;
     }
 
     public override void Dispose()
