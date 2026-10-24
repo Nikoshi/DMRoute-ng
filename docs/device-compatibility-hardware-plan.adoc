@@ -1,0 +1,296 @@
+= Gerätekompatibilität AnyTone und RT3S
+:toc:
+:sectnums:
+
+== Ziel
+
+Dieser Test weist nach, dass DMRoute-ng die beobachteten Protokollvarianten des
+AnyTone und des Retevis RT3S ohne konfiguriertes Herstellerprofil verarbeitet.
+Geprüft werden Radio Check, Call Alert, bestätigte und unbestätigte SDS sowie
+die beiden bekannten positiven Zustellquittungen:
+
+* vollständiger TMS-Delivery-Report, wie beim AnyTone beobachtet,
+* bestätigter DMR-Response-Header, wie beim RT3S erfasst.
+
+DMRoute-ng sendet nicht vorsorglich mehrere Gerätevarianten. Der gemeinsame
+Sendepfad wird verwendet; eine gültige Antwort wird anhand von Pakettyp, CRC,
+inneren und äußeren IDs sowie Gruppen-/Privatkennzeichnung erkannt. Die erste
+positive Quittung beendet einen Vorgang genau einmal.
+
+Der Test ergänzt den allgemeinen Hardwaretest und den Radio-Check-Resolver-
+Testplan. Mehrzonen-WHOIS und Outbox-Übergabe zwischen zwei Mastern werden
+weiterhin durch `RCR06` bis `RCR09` abgedeckt.
+
+== Geräte und IDs
+
+=== Etappe A: ein physisches Zielgerät
+
+Ein physischer Homebrew-Hotspot und ein Playground-Hotspot bilden getrennte
+Eingangswege. Pro Lauf ist nur das jeweilige physische Zielgerät eingeschaltet.
+
+[cols="1,2,2,2,2",options="header"]
+|===
+|Lauf |Master |Physisches Ziel |Physischer Hotspot |Virtuelle Quelle
+
+|A
+|Zone `100`
+|AnyTone `10001`
+|`1000001`
+|`src-for-anytone`, ID `10101`, Hotspot `1000010`
+
+|B
+|Zone `101`
+|RT3S `10101`
+|`1010001`
+|`src-for-rt3s`, ID `10001`, Hotspot `1010010`
+|===
+
+Die virtuelle Quelle verwendet jeweils die ID des ausgeschalteten realen
+Gegenmodells. Damit bleiben vorhandene Kontakte sowie die bereits erfassten
+Quell-/Zielkombinationen vergleichbar. Doppelte aktive IDs sind ausgeschlossen.
+
+=== Etappe B: zwei physische RF-Endpunkte
+
+Nach Reparatur des zweiten Hotspots werden beide Geräte gleichzeitig über
+getrennte RF-Endpunkte an einen Master der Zone `100` angebunden:
+
+[cols="2,2,2",options="header"]
+|===
+|RF-Endpunkt |Hotspot |Funkgerät
+
+|A
+|`1000001`
+|AnyTone `10001`
+
+|B
+|`1000002`
+|RT3S `10101`
+|===
+
+Die Endpunkte verwenden getrennte Frequenzen oder eine gleichwertige
+RF-Isolation. Dadurch kann nur die UDP-Weiterleitung durch den Master die
+Gegenstelle erreichen.
+
+== Vorbereitung
+
+. Getesteten Commit, Buildart, Funkgerätefirmware, Hotspotsoftware, Frequenz,
+  Color Code und Timeslot notieren.
+. Auf beiden Funkgeräten private Kontakte für `10001`, `10101`, `990098` und
+  `990099` anlegen. Die virtuelle Quell-ID muss im Zielgerät als Kontakt
+  vorhanden sein.
+. Für Lauf A und B getrennte lokale Master- und Playground-Konfigurationen
+  anlegen. PSKs und vollständige lokale Konfigurationen werden nicht
+  eingecheckt.
+. Resolver, Fallback-SDS und Echo-Dienst aktivieren. Für jeden Lauf einen
+  eigenen temporären Outbox-Pfad verwenden.
+. Vor jedem isolierten Testfall den Master neu starten, die Outbox sichern und
+  nur die ausdrücklich geforderte virtuelle Quelle ankündigen.
+. Das jeweils nicht verwendete physische Funkgerät ausschalten.
+. Zwischen zwei Funkaktionen mindestens fünf Sekunden warten. Retry- und
+  Timeout-Fälle vollständig auslaufen lassen.
+
+== Aufzeichnung
+
+Physisches Netzwerk und Loopback werden gleichzeitig aufgezeichnet. Unter
+macOS wird für den physischen Hotspot beispielsweise `en0` und für das
+Playground `lo0` verwendet:
+
+[source,shell]
+----
+sudo tcpdump -ni <PHYSISCHES_INTERFACE> -s 0 -U \
+  -w /private/tmp/dmroute-device-compat-<FALL>-net.pcap \
+  'udp port 62031 or udp port 42069'
+
+sudo tcpdump -ni lo0 -s 0 -U \
+  -w /private/tmp/dmroute-device-compat-<FALL>-loopback.pcap \
+  'udp port 62031 or udp port 42069'
+----
+
+Zusätzlich werden gesichert:
+
+* Masterlog und Playground-Ausgabe,
+* Uhrzeit und Displayanzeige des Funkgeräts,
+* Outbox vor und nach Fallback-Fällen,
+* Ergebnis je Fall als `bestanden`, `fehlgeschlagen` oder
+  `gerätebedingt nicht unterstützt`,
+* Anzahl der Requests, Datenübertragungen, Quittungen und Retries.
+
+Die Dateinamen verwenden das Schema
+`dmroute-device-compat-<GERÄT>-<FALL>-<DATUM>.*`. Rohmitschnitte bleiben lokal,
+wenn sie Netzwerkdaten oder andere nicht öffentliche Informationen enthalten.
+
+== Etappe A: isolierte Gerätefälle
+
+=== DC01: Radio Check an unbekanntes AnyTone
+
+. Master Zone `100`, physischen Hotspot und Playground-Hotspot starten.
+. Nur `src-for-anytone` anmelden und ankündigen.
+. Das AnyTone einschalten, seit dem Masterstart aber nichts senden lassen.
+. Im Playground ausführen:
+
+[source,text]
+----
+radio check src-for-anytone 10001
+----
+
+Erwartet werden fünf Preambles, ein Request und eine gültige positive
+`0x24`-Antwort. Die virtuelle Quelle meldet beim ersten Versuch Erfolg; es
+entsteht kein Fallback-Eintrag.
+
+=== DC02: Radio Check an unbekanntes RT3S
+
+. Master Zone `101`, physischen Hotspot und Playground-Hotspot frisch starten.
+. Nur `src-for-rt3s` anmelden und ankündigen.
+. Das RT3S einschalten, seit dem Masterstart aber nichts senden lassen.
+. Im Playground ausführen:
+
+[source,text]
+----
+radio check src-for-rt3s 10101
+----
+
+Der Request muss dem capture-verifizierten Format entsprechen. Eine positive
+`0x24`-Antwort ist als Erfolg zuzuordnen. Ohne Antwort müssen Retry, Timeout,
+Negativ-Cache und genau ein Fallback-Eintrag sichtbar sein.
+
+Da das RT3S einen direkten Radio Check des AnyTone bereits beantwortet hat, ist
+ein ausbleibender Response kein abschließender Gerätebefund. In diesem Fall wird
+die Diagnose unter <<rt3s-radio-check-diagnose>> vollständig ausgeführt.
+
+=== DC03: bekannte Zielroute
+
+`DC01` und `DC02` werden wiederholt, nachdem das jeweilige Zielgerät durch
+einen kurzen Gruppenruf seine Route bekannt gemacht hat. Request, Preambles,
+Zeitabstände und Antwort müssen mit der Blind-Probe verglichen werden.
+
+Der Vergleich trennt einen Fehler der aktiven Blind-Probe von einem allgemein
+fehlerhaften Geräte- oder Control-Pfad.
+
+=== DC04: Call Alert als Kontrollpfad
+
+Für beide physischen Ziele wird aus dem Playground ausgeführt:
+
+[source,text]
+----
+radio alert <VIRTUELLE_QUELLE> <ZIEL_ID>
+----
+
+Erwartet werden vier Preambles, der capture-verifizierte Request und die
+positive Antwort. Funktioniert Call Alert, aber Radio Check nicht, sind
+RF-Pfad, Hotspot und allgemeine Control-Rückleitung grundsätzlich funktionsfähig.
+
+=== DC05: Echo mit AnyTone
+
+. Vom AnyTone eine Gruppen-SDS `ECHO AT-01` an Dienst `990099` senden.
+. Private Antwort, Empfangszeit und Sendestatus notieren.
+. Dieselbe Nachricht innerhalb von 30 Sekunden erneut senden.
+
+Erwartet werden genau eine angezeigte Antwort, ein positiver vollständiger
+TMS-Delivery-Report und keine Antwort auf das Duplikat.
+
+=== DC06: Echo mit RT3S
+
+. Vom RT3S eine Gruppen-SDS `ECHO RT-01` an Dienst `990099` senden.
+. Private Antwort, Empfangszeit und Sendestatus notieren.
+. Dieselbe Nachricht innerhalb von 30 Sekunden erneut senden.
+
+Erwartet werden genau eine angezeigte Antwort und ein positiver bestätigter
+DMR-Response-Header. Dieser muss die Transaktion ohne weitere Wiederholung
+abschließen. Das Duplikat erhält keine zweite Antwort.
+
+=== DC07: bestätigte SDS vom Playground zum Funkgerät
+
+Je Lauf wird ausgeführt:
+
+[source,text]
+----
+sds send <VIRTUELLE_QUELLE> fug <ZIEL_ID> "TEST <GERÄT> 01"
+----
+
+Das Zielgerät muss den Text anzeigen. Der Playground muss den vollständigen
+TMS-Delivery-Report oder den positiven DMR-Response-Header als Erfolg melden.
+NACK, falsche IDs und Timeout dürfen nicht als Erfolg gelten.
+
+=== DC08: bestätigte SDS vom Funkgerät zum Playground
+
+. Das virtuelle Ziel mit `radio announce` bekannt machen.
+. Vom physischen Funkgerät `TEST <GERÄT> 02` an die virtuelle ID senden.
+. Virtuelle Inbox sowie Sendestatus am physischen Gerät prüfen.
+
+Der Master muss Header und alle Datenblöcke weiterleiten. Das Playground muss
+den Text vollständig reassemblieren und die Übertragung bestätigen. Sendet ein
+Gerät nach dem bestätigten Header keine Datenblöcke, wird dies als
+Geräteverhalten dokumentiert; ein unvollständiger Text darf nicht publiziert
+werden.
+
+=== DC09: Fallback-SDS und Quittungsvarianten
+
+Dieser Fall wird für beide Geräte getrennt ausgeführt:
+
+. Zielgerät ausschalten.
+. Radio Check auslösen und alle Versuche bis zum endgültigen Timeout abwarten.
+. Genau einen Outbox-Eintrag für Quelle und Ziel nachweisen.
+. Zielgerät einschalten und mit einem kurzen Gruppenruf seine Route bekannt
+  machen.
+. Die Nachricht `Verbindungsversuch von <QUELL_ID>` von `990098` abwarten.
+
+Beim AnyTone leert der positive TMS-Delivery-Report die Outbox. Beim RT3S muss
+der positive bestätigte DMR-Response-Header denselben Effekt haben. Eine
+negative Quittung oder ein Timeout lässt den Eintrag bestehen. Treffen beide
+positiven Varianten ein, darf der Vorgang nur einmal abgeschlossen werden.
+
+[[rt3s-radio-check-diagnose]]
+== Diagnose bei fehlender RT3S-Radio-Check-Antwort
+
+Antwortet das RT3S in `DC02` oder `DC03` nicht, wird vor einer Codeänderung
+folgende Vergleichsmessung durchgeführt:
+
+. Kontakt, Timeslot, Color Code und Kanal des RT3S erneut prüfen.
+. Das echte AnyTone mit ID `10001` unter denselben Einstellungen einen Radio
+  Check an `10101` senden lassen.
+. Physische und mastergenerierte Sequenz hinsichtlich Quell-/Ziel-ID,
+  CSBK-Inhalt, CRC, fünf Preambles und ungefähr 60 ms Abstand vergleichen.
+. Den mastergenerierten Versuch mit bekannter und unbekannter Zielroute jeweils
+  dreimal wiederholen.
+
+Antwortet das RT3S auf die physische Referenz, aber nicht auf eine byte- und
+zeitgleiche Mastersequenz, bleibt die Serverkompatibilität offen und Issue #9
+wird nicht geschlossen. Antwortet es auch auf die Referenz nicht, wird die
+Geräte- oder Kontaktkonfiguration als Ursache dokumentiert; Timeout und
+Fallback müssen dennoch korrekt funktionieren.
+
+== Etappe B: zwei physische Hotspots
+
+Nach Reparatur des zweiten Hotspots werden beide Teilnehmer zunächst durch
+einen kurzen Gruppenruf an ihrem jeweiligen Hotspot gelernt. Danach folgen:
+
+. Radio Check AnyTone `10001` nach RT3S `10101`,
+. Radio Check RT3S `10101` nach AnyTone `10001`,
+. Call Alert in beiden Richtungen,
+. bestätigte private SDS in beiden Richtungen,
+. Echo-Aufruf von jedem Gerät.
+
+Für jeden Vorgang muss der PCAP den Eingang ausschließlich am Quell-Hotspot und
+den Ausgang ausschließlich am Ziel-Hotspot zeigen. Eine RF-Direktverbindung
+zwischen den Geräten ist durch Frequenztrennung oder Abschirmung auszuschließen.
+Dienstframes an `990098` und `990099` dürfen nicht an den unbeteiligten Hotspot
+oder ins Mesh weitergeleitet werden.
+
+== Abnahmekriterien
+
+Die Gerätekompatibilität ist hardwareseitig bestätigt, wenn:
+
+* AnyTone- und RT3S-Frames ohne Herstellerprofil korrekt klassifiziert werden,
+* beide Geräte bestätigte SDS empfangen und senden können oder eine
+  geräteseitig unvollständige Sendung eindeutig im PCAP belegt ist,
+* TMS-Delivery-Report und positiver DMR-Response-Header jeweils eine Zustellung
+  genau einmal abschließen,
+* Radio-Check-Antworten korrekt der laufenden Transaktion zugeordnet werden,
+* ein nicht antwortendes Gerät kontrolliert in Timeout und genau einen
+  Fallback-Eintrag übergeht,
+* Duplikate keine zweite Nachricht und keinen zweiten Abschluss erzeugen,
+* Etappe B jede Weiterleitung über den richtigen Ziel-Hotspot nachweist.
+
+Nach der Durchführung wird ein datierter deutscher Hardwarebericht erstellt.
+`TODO.md` und `HANDOFF.md` erhalten je Gerät und Fall den Status `bestanden`,
+`fehlgeschlagen` oder `gerätebedingt nicht unterstützt`.

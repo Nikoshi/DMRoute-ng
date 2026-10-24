@@ -130,10 +130,38 @@ public static class HomebrewProtocol
     public static bool IsDmrd(ReadOnlySpan<byte> packet) =>
         packet.Length >= MinimumDmrdLength && packet.StartsWith("DMRD"u8);
 
+    public static bool TryReadDmrdInfo(ReadOnlySpan<byte> packet, out DmrdFrameInfo info)
+    {
+        if (!IsDmrd(packet))
+        {
+            info = default;
+            return false;
+        }
+
+        var flags = packet[15];
+        info = new DmrdFrameInfo(
+            packet[4],
+            ReadUInt24BigEndian(packet[5..8]),
+            ReadUInt24BigEndian(packet[8..11]),
+            BinaryPrimitives.ReadInt32BigEndian(packet[11..15]),
+            (flags & 0x80) == 0 ? 1 : 2,
+            (flags & 0x40) == 0,
+            (flags & 0x20) != 0,
+            (byte)(flags & 0x0F),
+            BinaryPrimitives.ReadUInt32BigEndian(packet[16..20]));
+        return true;
+    }
+
     public static int ReadDmrdSourceId(ReadOnlySpan<byte> packet)
     {
         EnsureDmrd(packet);
-        return (packet[5] << 16) | (packet[6] << 8) | packet[7];
+        return ReadUInt24BigEndian(packet[5..8]);
+    }
+
+    public static int ReadDmrdDestinationId(ReadOnlySpan<byte> packet)
+    {
+        EnsureDmrd(packet);
+        return ReadUInt24BigEndian(packet[8..11]);
     }
 
     public static int ReadDmrdRepeaterId(ReadOnlySpan<byte> packet)
@@ -146,6 +174,9 @@ public static class HomebrewProtocol
     {
         if (!IsDmrd(packet)) throw new ArgumentException("A DMRD packet must contain at least 23 bytes.", nameof(packet));
     }
+
+    private static int ReadUInt24BigEndian(ReadOnlySpan<byte> value) =>
+        (value[0] << 16) | (value[1] << 8) | value[2];
 
     private static void WriteFixedAscii(ref Span<byte> destination, string value, int length, string fieldName)
     {

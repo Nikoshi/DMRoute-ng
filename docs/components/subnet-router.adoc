@@ -3,7 +3,13 @@
 :sectnums:
 
 == Übersicht
+
 Der `MicroSubnetRouter` ist für das zustandslose Routing von DMR-Paketen (DMRD) auf Basis von Subnetzen zuständig. Er ersetzt klassische, speicherintensive Talkgroup-Subscriptions durch eine mathematische Segmentierung.
+
+Vor dem normalen Routing behandelt der Router die reservierten lokalen
+Dienst-IDs `990000` bis `999999`. Datenframes an diese Ziele werden synchron an
+die Dienstschicht übergeben und nicht weitergeleitet oder als Teilnehmerroute
+gelernt. Pakete mit einer reservierten Dienst-ID als Quelle werden verworfen.
 
 == Subnetz-Berechnung & Haushalts-Bestimmung
 Die Zuordnung eines Funkgeräts oder Repeaters zu einem spezifischen Subnetz (Haushalt) erfolgt durch eine einfache Ganzzahldivision der DMR-ID:
@@ -30,8 +36,18 @@ Das reine Subnetz-Routing wurde um Mesh-Roaming erweitert, um netzwerkübergreif
 * **Private Calls (Unit Calls):** Der Router prüft zuerst die lokale Gast-Registry. Ist das Ziel lokal unbekannt, wird die aktuelle Aufenthalts-Zone über die `RoamingRegistry` ermittelt und das Paket gezielt ins Mesh an den zuständigen Master geroutet.
 * **Group Calls:** Werden abhängig von der Ziel-ID ins Mesh geflutet (z. B. TG 1 an alle bekannten Master, TG 100-999 an explizite Zonen).
 
+Nicht routbare, gültig dekodierte Radio-Check-Anfragen werden als kleines
+Value-Type-Ereignis an den `RadioCheckReachabilityCoordinator` übergeben. Er
+führt Heimat-, Roaming- und WHOIS-Suche auf Background-Workern aus. Andere
+private Paketarten behalten das bisherige Verhalten.
+
 == Zustandsgrenzen
 
-Call- und Teilnehmer-Routen verwenden beim Start vorreservierte Dictionaries. Updates vorhandener Einträge und Einfügungen bis zur konfigurierten Kapazität lösen keine Vergrößerung aus. Ist eine Tabelle voll, läuft die Paketweiterleitung weiter und nur der zusätzliche Tracking-Zustand entfällt.
+Call- und Teilnehmer-Routen verwenden beim Start vorreservierte Dictionaries.
+Teilnehmerrouten speichern zusätzlich `LastSeen` und werden nach 15 Minuten
+nicht mehr verwendet. Updates vorhandener Einträge und Einfügungen bis zur
+konfigurierten Kapazität lösen keine Vergrößerung aus. Ist eine Tabelle voll,
+läuft die Paketweiterleitung weiter und nur der zusätzliche Tracking-Zustand
+entfällt.
 
 Frame-Events übergeben `ReadOnlySpan<byte>` synchron. Das `SdsGateway` verarbeitet den Span während des Callbacks; es wird keine vollständige DMR-Frame-Kopie erzeugt.

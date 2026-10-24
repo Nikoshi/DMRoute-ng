@@ -71,6 +71,48 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  documentation:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    needs: release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set Short SHA
+        id: vars
+        shell: bash
+        run: echo "sha_short=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Validate and build PDF documentation
+        run: make docs-pdf
+
+      - name: Add documentation to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-release-${{ steps.vars.outputs.sha_short }}
+          name: CI Release ${{ steps.vars.outputs.sha_short }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/docs/DMRoute-ng-Handbuch.pdf
+            artifacts/docs/DMRoute-ng-Hardwaretests.pdf
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Delete older releases
         uses: dev-drprasad/delete-older-releases@v0.3.4
         with:
@@ -80,4 +122,3 @@ jobs:
           delete_tags_pattern: '^ci-release-.*'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
+using DMRoute_ng.Services;
 using Microsoft.Extensions.Configuration;
 
 namespace DMRoute_ng.Configuration;
@@ -13,7 +14,9 @@ public sealed record DmRouteSettings
     public string ZonePsk { get; init; } = DefaultZonePsk;
     public string MeshPsk { get; init; } = DefaultMeshPsk;
     public RoutingSettings Routing { get; init; } = new();
+    public RadioCheckSettings RadioCheck { get; init; } = new();
     public SdsSettings Sds { get; init; } = new();
+    public ServicesSettings Services { get; init; } = new();
     public MqttSettings Mqtt { get; init; } = new();
 
     public static DmRouteSettings FromConfiguration(IConfiguration configuration)
@@ -37,10 +40,27 @@ public sealed record DmRouteSettings
                 MaxActiveCalls = ReadInt(configuration, "Routing:MaxActiveCalls", 256),
                 MaxLocalDeviceRoutes = ReadInt(configuration, "Routing:MaxLocalDeviceRoutes", 8192)
             },
+            RadioCheck = new RadioCheckSettings
+            {
+                Enabled = ReadBool(configuration, "RadioCheck:Enabled", true),
+                MaxPending = ReadInt(configuration, "RadioCheck:MaxPending", 128),
+                FallbackSdsEnabled = ReadBool(configuration, "RadioCheck:FallbackSdsEnabled", true),
+                FallbackServiceId = ReadInt(configuration, "RadioCheck:FallbackServiceId", 990098),
+                FallbackTtlHours = ReadInt(configuration, "RadioCheck:FallbackTtlHours", 24),
+                FallbackCapacity = ReadInt(configuration, "RadioCheck:FallbackCapacity", 128),
+                OutboxPath = ReadString(configuration, "RadioCheck:OutboxPath", "data/radio-check-outbox.json")
+            },
             Sds = new SdsSettings
             {
                 MaxSessions = ReadInt(configuration, "Sds:MaxSessions", 128),
                 MaxMessageBytes = ReadInt(configuration, "Sds:MaxMessageBytes", 4096)
+            },
+            Services = new ServicesSettings
+            {
+                Echo = new EchoServiceSettings
+                {
+                    Enabled = ReadBool(configuration, "Services:Echo:Enabled", true)
+                }
             },
             Mqtt = new MqttSettings
             {
@@ -65,6 +85,14 @@ public sealed record DmRouteSettings
         RequireText(MeshPsk, "MeshPsk");
         RequirePositive(Routing.MaxActiveCalls, "Routing:MaxActiveCalls");
         RequirePositive(Routing.MaxLocalDeviceRoutes, "Routing:MaxLocalDeviceRoutes");
+        RequirePositive(RadioCheck.MaxPending, "RadioCheck:MaxPending");
+        if (RadioCheck.FallbackServiceId is < 990000 or > 999999)
+            throw Invalid("RadioCheck:FallbackServiceId", "must be a reserved ID between 990000 and 999999");
+        if (RadioCheck.FallbackSdsEnabled && Services.Echo.Enabled && RadioCheck.FallbackServiceId == DmrServiceIds.Echo)
+            throw Invalid("RadioCheck:FallbackServiceId", "must not conflict with the enabled SDS echo service");
+        RequirePositive(RadioCheck.FallbackTtlHours, "RadioCheck:FallbackTtlHours");
+        RequirePositive(RadioCheck.FallbackCapacity, "RadioCheck:FallbackCapacity");
+        RequireText(RadioCheck.OutboxPath, "RadioCheck:OutboxPath");
         RequirePositive(Sds.MaxSessions, "Sds:MaxSessions");
         RequirePositive(Sds.MaxMessageBytes, "Sds:MaxMessageBytes");
         RequireText(Mqtt.Host, "Mqtt:Host");
@@ -132,10 +160,31 @@ public sealed record RoutingSettings
     public int MaxLocalDeviceRoutes { get; init; } = 8192;
 }
 
+public sealed record RadioCheckSettings
+{
+    public bool Enabled { get; init; } = true;
+    public int MaxPending { get; init; } = 128;
+    public bool FallbackSdsEnabled { get; init; } = true;
+    public int FallbackServiceId { get; init; } = 990098;
+    public int FallbackTtlHours { get; init; } = 24;
+    public int FallbackCapacity { get; init; } = 128;
+    public string OutboxPath { get; init; } = "data/radio-check-outbox.json";
+}
+
 public sealed record SdsSettings
 {
     public int MaxSessions { get; init; } = 128;
     public int MaxMessageBytes { get; init; } = 4096;
+}
+
+public sealed record ServicesSettings
+{
+    public EchoServiceSettings Echo { get; init; } = new();
+}
+
+public sealed record EchoServiceSettings
+{
+    public bool Enabled { get; init; } = true;
 }
 
 public sealed record MqttSettings

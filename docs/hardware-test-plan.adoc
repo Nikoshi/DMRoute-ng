@@ -1,10 +1,13 @@
-= Hardware-Smoke-Test mit einem Hotspot
+= Hardware-Smoke- und Protokolltests
 :toc:
 :sectnums:
 
 == Ziel und Reichweite
 
-Dieser Test prüft einen DMRoute-ng-Master der Zone `100` mit den Funkgeräte-IDs `10001` und `10101` sowie einem einzelnen Homebrew/MMDVM-Hotspot.
+Die Basisschritte H01 bis H08 prüfen einen DMRoute-ng-Master der Zone `100` mit
+den Funkgeräte-IDs `10001` und `10101` sowie einem einzelnen
+Homebrew/MMDVM-Hotspot. H09 verwendet nach dessen Reparatur einen zweiten
+RF-Endpunkt; H10 validiert den lokalen SDS-Echo-Dienst.
 
 Mit diesem Aufbau lassen sich folgende Pfade belastbar prüfen:
 
@@ -16,7 +19,12 @@ Mit diesem Aufbau lassen sich folgende Pfade belastbar prüfen:
 * Timeout und erneute Anmeldung des Hotspots,
 * SDS/SMS-Reassembly, Dekodierung und Zustellung in beiden Richtungen.
 
-Ein zweiter unabhängiger RF-Endpunkt fehlt. Deshalb beweist empfangenes Audio allein keine Weiterleitung durch den Master: Beide Funkgeräte können sich direkt auf derselben Frequenz hören. Die Rückleitung eines Privatrufs wird stattdessen anhand der UDP-Richtung im Paketmitschnitt geprüft. Gruppenrufe werden vom Router absichtlich nicht an den Hotspot zurückgesendet, von dem sie stammen.
+Im Ein-Hotspot-Aufbau beweist empfangenes Audio allein keine Weiterleitung durch
+den Master: Beide Funkgeräte können sich direkt auf derselben Frequenz hören.
+Die Rückleitung eines Privatrufs wird deshalb anhand der UDP-Richtung im
+Paketmitschnitt geprüft. Gruppenrufe werden vom Router absichtlich nicht an den
+Hotspot zurückgesendet, von dem sie stammen. Der getrennte Zwei-Hotspot-Aufbau
+für H09 ist im Radio-Check-Capture-Plan beschrieben.
 
 == Voraussetzungen
 
@@ -174,15 +182,13 @@ Direkte SDS an einzelne Teilnehmer verwenden bestätigte Datenübertragung. SDS 
 . Von `10101` die Nachricht `DMR TEST 2` an `10001` senden.
 . Erneut zehn Sekunden warten und den angezeigten Sendestatus notieren.
 
-Erwartete Logzeilen enthalten jeweils Quelle, Ziel, Encoding und den vollständigen Text:
-
-[source,text]
-----
-SMS von 10001 an 10101 (...): DMR TEST 1
-SMS von 10101 an 10001 (...): DMR TEST 2
-----
-
-MQTT veröffentlicht beide Nachrichten nicht-retained unter `dmroute/100/sds/sms`; `srcId` und `dstId` im JSON-Payload unterscheiden die Richtung. Im Mitschnitt werden die zugehörigen DMRD-Datenframes sowie die Rückleitung vom Master zum Hotspot geprüft. Damit werden Transport, Reassembly und Textdekodierung getrennt bewertet. Falls der Transport sichtbar ist, aber Log oder MQTT-Text fehlt, ist das ein konkreter SDS-Kompatibilitäts- oder Decoderfehler und kein allgemeiner Verbindungsfehler.
+MQTT veröffentlicht beide Nachrichten nicht-retained unter
+`dmroute/100/sds/sms`; `srcId`, `dstId`, `message` und `timestamp` müssen zur
+jeweiligen Richtung passen. Im Mitschnitt werden die zugehörigen DMRD-Datenframes
+sowie die Rückleitung vom Master zum Hotspot geprüft. Damit werden Transport,
+Reassembly und Textdekodierung getrennt bewertet. Falls der Transport sichtbar
+ist, aber der MQTT-Text fehlt, liegt ein konkreter SDS-Kompatibilitäts-, Queue-
+oder Decoderfehler und kein allgemeiner Verbindungsfehler vor.
 
 Bei einem Fehler der bestätigten Übertragung kann zusätzlich eine unbestätigte Gruppen-SDS an TG 9 gesendet werden. Erreichen deren Datenblöcke den Master, sind Encoder und Decoder grundsätzlich kompatibel und der Fehler ist auf den Confirmed-Handshake einzugrenzen.
 
@@ -214,6 +220,50 @@ Der ausgeführte Lauf ist im
 link:hardware-test-results-2026-09-13-location.adoc[Location-Hardware-Testbericht]
 dokumentiert.
 
+=== H09: Radio Check über zwei RF-Endpunkte
+
+Dieser Schritt benötigt beide Hotspots und beginnt erst nach Reparatur des
+gelösten Antennensteckers am zweiten Gerät. Vorbereitung, zwölf isolierte Läufe,
+Wiederholungszählung und Ergebnisübergabe stehen im
+link:radio-check-capture-plan.adoc[Radio-Check-Capture-Plan]. Der frühere
+Ein-Hotspot-Befund ist im
+link:hardware-test-results-2026-09-13-radio-check.adoc[Radio-Check-Hardwarebericht]
+dokumentiert.
+
+Ein antwortorientierter Ein-Hotspot-Lauf vom 21. September 2026 hat inzwischen
+Request und positive Antwort für Radio Check sowie Call Alert vollständig
+erfasst. Die Bytefelder und die weiterhin offene bidirektionale Messreihe stehen
+im link:hardware-test-results-2026-09-21-control.adoc[Control-Hardwarebericht].
+
+Die Abnahme des darauf aufbauenden Heimat-/Roaming-/WHOIS-Resolvers und der
+persistenten Fallback-SDS beschreibt der
+link:radio-check-resolver-hardware-plan.adoc[Radio-Check-Resolver-Testplan].
+
+=== H10: SDS-Echo-Dienst
+
+Dieser Schritt verwendet zunächst den funktionierenden Hotspot. Für den
+abschließenden Nachweis der lokalen Konsumierung werden nach der Reparatur beide
+Hotspots angemeldet.
+
+. `Services:Echo:Enabled` auf `true` belassen und Master sowie Paketmitschnitt
+  neu starten.
+. Vom AnyTone mit DMR-ID `10001` eine Gruppen-SDS `ECHO Hallo` an TG `990099`
+  senden.
+. Private Antwort, Empfangszeit und Sendestatus notieren.
+. Den gleichen Text innerhalb von 30 Sekunden erneut senden und prüfen, dass
+  keine zweite Antwort folgt.
+. Eine Nachricht mit mehr als 120 UTF-16-Codeeinheiten senden und die
+  Fehlerantwort prüfen.
+. Die normale Echo-Nachricht mit dem Retevis `10101` wiederholen.
+. Im PCAP je erfolgreicher Antwort vier Preambles, bestätigten Datenheader,
+  Rate-3/4-Blöcke und die Antwort des Funkgeräts zuordnen.
+. Mit zwei angemeldeten Hotspots prüfen, dass der Echo-Befehl nicht zum zweiten
+  Hotspot oder ins Mesh weitergeleitet und nicht unter `sds/sms` publiziert wird.
+
+Die erwartete private Antwort lautet `ECHO Hallo | RX <n> ms`. Bei Überlänge
+lautet sie `ERROR text too long (max 120) | RX <n> ms`. Das Master-Log bestätigt
+die zugestellte Antwort oder meldet nach höchstens drei Versuchen einen Fehler.
+
 == Ergebnisübergabe und Verifikation
 
 Nach dem letzten Schritt zuerst `tcpdump` und danach den Master mit `Ctrl+C` beenden. Für die Auswertung werden benötigt:
@@ -221,6 +271,9 @@ Nach dem letzten Schritt zuerst `tcpdump` und danach den Master mit `Ctrl+C` bee
 * `/tmp/dmroute-hardware.log`,
 * `/tmp/dmroute-hardware.pcap`,
 * bei H08 die MQTT-Payloads von `sds/gps` und `sds/sms`,
+* bei H09 die im Radio-Check-Capture-Plan genannten zwölf Einzel-PCAPs,
+* die PCAPs, Logs und Outbox-Snapshots aus dem Radio-Check-Resolver-Testplan,
+* bei H10 die Echo-PCAPs und notierten Antworten beider Funkgeräte,
 * die notierten Uhrzeiten und das Ergebnis je Schritt (`OK`, `Fehler` oder `nicht ausgeführt`),
 * Hotspot-Modell, Software/Firmware und verwendete Hotspot-ID,
 * bei SMS zusätzlich Hersteller und Modell der Funkgeräte.
@@ -264,4 +317,12 @@ Liegen die Dateien auf derselben Entwicklungsmaschine, genügt die Mitteilung ih
 |H08
 |APRS und manueller GPS-Text dekodiert werden und MQTT ausschließlich Rasterkoordinaten beziehungsweise den redigierten SMS-Text enthält
 |ja, bei GPS-Fix und erreichbarem MQTT
+
+|H09
+|Anfrage, Antwort, Wiederholungen und Timeout in beiden Geräterichtungen über getrennte RF-Endpunkte eindeutig aufgezeichnet sind
+|ja, vor Implementierung von Issue #9
+
+|H10
+|AnyTone und Retevis die bestätigte Echo-Antwort erhalten, Duplikat und Überlänge korrekt behandelt und Dienstframes lokal konsumiert werden
+|ja, vor Abschluss von Issue #10
 |===

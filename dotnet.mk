@@ -1,4 +1,4 @@
-.PHONY: help run test add rm list restore clean distclean edit docker docker.tar
+.PHONY: help run playground test add rm list restore clean distclean edit docker docker.tar docs docs-check docs-html docs-pdf
 
 MAKEFLAGS += --silent
 
@@ -24,7 +24,12 @@ help:
 	@echo "---------------+------------------------------------------"
 	@echo "help           | Shows this help"
 	@echo "run            | Runs the project"
+	@echo "playground     | Runs the interactive emulator playground"
 	@echo "test           | Runs the tests"
+	@echo "docs           | Builds and validates HTML/PDF documentation"
+	@echo "docs-check     | Validates every AsciiDoc source"
+	@echo "docs-html      | Builds the two HTML manuals"
+	@echo "docs-pdf       | Builds the two PDF manuals"
 	@echo "add PKG=<name> | Adds package"
 	@echo "rm PKG=<name>  | Removes package"
 	@echo "list           | List packages"
@@ -39,6 +44,9 @@ help:
 
 run: $(BINARY)
 	dotnet run --project $(PROJECT_PATH) -c $(PROJECT_CONFIG) --no-build
+
+playground:
+	dotnet run --project tools/DMRoute_ng.Playground/DMRoute_ng.Playground.csproj -c $(PROJECT_CONFIG) -- $(PLAYGROUND_ARGS)
 
 test: $(BINARY)
 	dotnet test -c $(PROJECT_CONFIG) --no-build
@@ -60,6 +68,7 @@ restore:
 clean:
 	dotnet clean
 	rm -f ${DOCKER_IMAGE_NAME}-${DOCKER_IMAGE_TAG}.tar
+	rm -rf artifacts/docs
 
 distclean: clean
 	rm -rf bin/

@@ -1,0 +1,115 @@
+= Hardwareergebnis Radio Check vom 13. September 2026
+:toc:
+:sectnums:
+
+== Ergebnis
+
+Die Gerätefunktion *Check Radio* funktioniert zwischen dem AnyTone und dem
+Retevis über den direkten Funkweg. Das anfragende AnyTone zeigte
+`Target Radio answered`. Die beobachtete Reihenfolge war:
+
+. AnyTone sendet, rote Anzeige.
+. Retevis empfängt, grüne Anzeige.
+. Retevis antwortet, rote Anzeige.
+. AnyTone empfängt, grüne Anzeige.
+
+Die Antwort war nur am anfragenden AnyTone als Text sichtbar. Der einzelne
+Simplex-Hotspot übermittelte die Antwort des Retevis in dem isolierten Lauf
+jedoch nicht als DMRD-Datagramm an den Master. Damit reicht dieser Aufbau nicht
+aus, um Anfrage- und Antwortformat sowie den vollständigen Vorgang für Issue #9
+belastbar abzuleiten.
+
+== Testaufbau
+
+[cols="2,3",options="header"]
+|===
+|Komponente |Wert
+
+|Master
+|Zone `100`, `10.229.157.107:62031`, Codebasis `9a093c2` mit lokalen Dokumentationsänderungen
+
+|Hotspot
+|Homebrew/MMDVM, ID `1000001`, `10.229.157.110:62032`, ein Simplex-RF-Endpunkt
+
+|Anfragendes Gerät
+|AnyTone AT-D878UV II, DMR-ID `10001`
+
+|Zielgerät
+|Retevis, DMR-ID `10101`; Modell und Firmware wurden in diesem Lauf nicht erfasst
+|===
+
+Beide Geräte befanden sich auf derselben Frequenz, demselben Color Code und
+demselben Timeslot. Vor RC01/1 hatten beide Teilnehmer einen kurzen TG-9-Ruf
+gesendet, sodass der Master beide IDs auf denselben Hotspot gelernt hatte.
+
+== Erfasste Läufe
+
+[cols="1,2,2,3,4",options="header"]
+|===
+|Lauf |Geräteergebnis |Funkanzeige |UDP-/CSBK-Ergebnis |Bewertung
+
+|Vorlauf
+|mehrere erfolgreiche Bedienversuche
+|nicht einzeln protokolliert
+|Radio Check, GPS und Vorbereitung vermischt
+|Nur Vergleichsmaterial; keine formale Evidenz
+
+|RC01/1
+|`Target Radio answered`
+|AnyTone TX, Retevis RX, Retevis TX, AnyTone RX
+|Zwei Opcode-`0x3d`-Preambles `10001 -> 10101`; beide vom Master zum Hotspot zurückgesendet; kein DMRD mit Quelle `10101`
+|Gültiger Gerätefunktionstest, aber kein vollständiger Protokollmitschnitt
+
+|RC01/2
+|`Target Radio answered` beim richtigen Ziel
+|dieselbe vollständige TX-/RX-Folge
+|Der PCAP enthält zuerst sechs CSBKs an die versehentlich gewählte ID `1010` und danach ein Opcode-`0x3d`-Preamble an `10101` mit Master-Rückleitung
+|Wegen der Fehlbedienung verworfen
+|===
+
+Das Paketfenster von RC01/1 lag zwischen `19:11:50,739` und
+`19:11:50,741`. Die beiden dekodierten Preambles lauten:
+
+[source,text]
+----
+bd000005002775002711ee58
+bd0000040027750027115639
+----
+
+Die Werte `002775` und `002711` entsprechen den DMR-IDs `10101` und `10001`.
+Opcode `0x3d` bezeichnet ein Preamble-CSBK und wird nicht als eigentliche
+Radio-Check-Anfrage oder -Antwort gezählt. Ein passendes UDP-seitiges
+`UU_V_Req` oder `UU_Ans_Rsp` wurde in RC01/1 nicht erfasst.
+
+== Grenze des Ein-Hotspot-Aufbaus
+
+`MicroSubnetRouter` hatte beide Teilnehmer auf denselben Hotspot gelernt. Er
+sendete die private Anfrage deshalb etwa eine Millisekunde nach ihrem Empfang
+an denselben Endpunkt zurück. Gleichzeitig antwortete das Retevis nachweislich
+über Funk.
+
+Eine plausible, noch nicht bewiesene Erklärung ist, dass der Simplex-Hotspot
+während seiner Rücksendung nicht gleichzeitig die direkte Antwort des Retevis
+empfangen konnte. Sicher belegt sind nur die Geräteanzeigen, die im PCAP
+enthaltenen Preambles und die Rückleitung durch den Master.
+
+== Entscheidung
+
+Die Messreihe und Issue #9 bleiben bis zu einem getrennten RF-Aufbau
+zurückgestellt. Aus den vorhandenen Paketen wird kein Produktionsparser
+abgeleitet. Seit dem 20. September 2026 sind zwei Hotspots verfügbar; der zweite
+benötigt vor dem neuen Lauf noch die Reparatur seines Antennensteckers.
+
+Nach der Reparatur werden beide Geräterichtungen, erreichbare und ausgeschaltete
+Ziele sowie je drei Wiederholungen gemäß dem aktualisierten Capture-Plan über
+getrennte RF-Endpunkte erfasst.
+
+== Lokale Belege
+
+Die Rohdaten werden nicht eingecheckt:
+
+* `/tmp/dmroute-radio-check-RC01-1.pcap`,
+* `/tmp/dmroute-radio-check-RC01-2-verworfen-ziel-1010.pcap`,
+* `/tmp/dmroute-radio-check-unclassified-20260913-1907.pcap`,
+* `/tmp/dmroute-radio-check-run.log`,
+* `/tmp/dmroute-radio-check-unclassified-20260913-1907.log`.

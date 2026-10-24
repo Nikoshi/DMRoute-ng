@@ -1,10 +1,12 @@
 using System.Buffers.Text;
 using System.Reflection;
+using System.Text;
 using System.Threading.Channels;
 using DMRoute_ng.Configuration;
 using DMRoute_ng.Gateways;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Services;
 using DMRoute_ng.Types;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -81,7 +83,8 @@ public sealed class MqttIntegrationService : BackgroundService
         var payloadBufferBytes = settings.Mqtt.PayloadBufferBytes;
 
         _stateInterval = TimeSpan.FromSeconds(stateIntervalSeconds);
-        _events = new MqttTelemetryQueue(eventCapacity, diagnosticCapacity, diagnosticFrameBytes);
+        _events = new MqttTelemetryQueue(eventCapacity, diagnosticCapacity, diagnosticFrameBytes,
+            settings.Sds.MaxMessageBytes);
         _eventPayloadBuffer = GC.AllocateUninitializedArray<byte>(payloadBufferBytes, pinned: true);
         _statePayloadBuffer = GC.AllocateUninitializedArray<byte>(payloadBufferBytes, pinned: true);
         _guestSnapshots = new LocalGuestSnapshot[roamingRegistry.MaxLocalGuests];
@@ -105,7 +108,7 @@ public sealed class MqttIntegrationService : BackgroundService
 
         router.OnCallEvent += HandleCallEvent;
         router.OnUnknownFrameReceived += HandleUnknownFrame;
-        sdsGateway.OnSmsReceived += HandleSms;
+        sdsGateway.OnMessageReceived += HandleSms;
         sdsGateway.OnLocationReceived += HandleLocation;
     }
 
@@ -202,10 +205,11 @@ public sealed class MqttIntegrationService : BackgroundService
         ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks) =>
         _events.EnqueueDiagnostic(packet, sourceId, hotspotId, dataType, occurredAtTicks);
 
-    private void HandleSms(int sourceId, int destinationId, string message, bool containsLocation) =>
-        _events.EnqueueSms(sourceId, destinationId,
-            containsLocation && _locationPrivacyEnabled ? RedactedLocationMessage : message,
-            DateTime.UtcNow.Ticks);
+    private void HandleSms(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes)
+    {
+        if (DmrServiceIds.IsReserved(message.DestinationId)) return;
+        _events.EnqueueSms(in message, textBytes);
+    }
 
     private void HandleLocation(in DmrLocationEvent location) => _events.EnqueueLocation(location);
 
@@ -246,10 +250,22 @@ public sealed class MqttIntegrationService : BackgroundService
 
     private void PublishSms(in MqttTelemetryEvent item)
     {
+        var slot = item.SmsMessage!;
+        var textBytes = slot.Buffer.AsSpan(0, slot.Length);
+        string message;
+        if (item.ContainsLocation && _locationPrivacyEnabled)
+            message = RedactedLocationMessage;
+        else if (item.Encoding == TmsMessageWriter.Utf16LittleEndianEncoding)
+        {
+            if ((textBytes.Length & 1) != 0) textBytes = textBytes[..^1];
+            message = Encoding.Unicode.GetString(textBytes).Trim('\0', '\r', '\n');
+        }
+        else message = Encoding.UTF8.GetString(textBytes).Trim('\0', '\r', '\n');
+
         var builder = new JsonSpanBuilder(_eventPayloadBuffer);
         builder.AppendNumber("srcId"u8, item.SourceId);
         builder.AppendNumber("dstId"u8, item.DestinationId);
-        builder.AppendString("message"u8, item.Message);
+        builder.AppendString("message"u8, message);
         builder.AppendTimestamp("timestamp"u8, item.OccurredAtTicks);
         builder.Finish();
         _mqttClient.Publish(BuildTopic(_eventTopicBuffer, "sds/sms"u8),
@@ -540,7 +556,7 @@ public sealed class MqttIntegrationService : BackgroundService
     {
         _router.OnCallEvent -= HandleCallEvent;
         _router.OnUnknownFrameReceived -= HandleUnknownFrame;
-        _sdsGateway.OnSmsReceived -= HandleSms;
+        _sdsGateway.OnMessageReceived -= HandleSms;
         _sdsGateway.OnLocationReceived -= HandleLocation;
         base.Dispose();
     }

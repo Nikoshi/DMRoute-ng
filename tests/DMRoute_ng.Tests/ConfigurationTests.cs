@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using DMRoute_ng.Configuration;
+using DMRoute_ng.Services;
 using Microsoft.Extensions.Configuration;
 
 namespace DMRoute_ng.Tests;
@@ -108,6 +109,18 @@ public sealed class ConfigurationTests
     }
 
     [Fact]
+    public void Settings_RejectFallbackServiceCollision()
+    {
+        var settings = ValidSettings() with
+        {
+            RadioCheck = new RadioCheckSettings { FallbackServiceId = DmrServiceIds.Echo }
+        };
+
+        Assert.Equal("RadioCheck:FallbackServiceId",
+            Assert.Throws<ConfigurationValidationException>(settings.Validate).Key);
+    }
+
+    [Fact]
     public void GeneratedJson_RoundTripsWithoutReflection()
     {
         var original = ValidSettings() with { ZoneId = 314 };
@@ -117,7 +130,9 @@ public sealed class ConfigurationTests
         Assert.False(JsonSerializer.IsReflectionEnabledByDefault);
         Assert.Equal(original, copy);
         Assert.Contains("\"Routing\"", json);
+        Assert.Contains("\"RadioCheck\"", json);
         Assert.Contains("\"Sds\"", json);
+        Assert.Contains("\"Services\"", json);
         Assert.Contains("\"Mqtt\"", json);
     }
 

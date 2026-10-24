@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
-using System.Text;
 using DMRoute_ng.Coding;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Services;
 using DMRoute_ng.Types;
 using Microsoft.Extensions.Logging;
 
@@ -16,7 +16,9 @@ public sealed class SdsGateway
         public int HotspotId;
         public int Length;
         public long LastSeenTicks;
+        public long StartedAtTicks;
         public bool IsConfirmedData;
+        public bool IsGroupCall;
         public bool Active;
     }
 
@@ -25,19 +27,27 @@ public sealed class SdsGateway
     private readonly Dictionary<int, int> _sessionSlots;
     private readonly SessionState[] _sessions;
     private readonly byte[] _messageStorage;
+    private readonly TimeProvider _timeProvider;
     private long _nextCleanupTicks;
     private long _droppedSessions;
     private long _oversizedMessages;
 
-    public delegate void SdsSmsHandler(int sourceId, int destinationId, string message, bool containsLocation);
+    public delegate void SdsMessageHandler(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes);
     public delegate void SdsLocationHandler(in DmrLocationEvent location);
+    public delegate void SdsDeliveryReportHandler(in SdsDeliveryReportEvent report);
 
-    public event SdsSmsHandler? OnSmsReceived;
+    public event SdsMessageHandler? OnMessageReceived;
     public event SdsLocationHandler? OnLocationReceived;
+    public event SdsDeliveryReportHandler? OnDeliveryReportReceived;
     public long DroppedSessions => Interlocked.Read(ref _droppedSessions);
     public long OversizedMessages => Interlocked.Read(ref _oversizedMessages);
 
-    public SdsGateway(ILogger<SdsGateway> logger, MicroSubnetRouter router, int maxSessions = 128, int maxMessageBytes = 4096)
+    public SdsGateway(
+        ILogger<SdsGateway> logger,
+        MicroSubnetRouter router,
+        int maxSessions = 128,
+        int maxMessageBytes = 4096,
+        TimeProvider? timeProvider = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSessions);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxMessageBytes, 64);
@@ -46,30 +56,48 @@ public sealed class SdsGateway
         _sessionSlots = new Dictionary<int, int>(maxSessions);
         _sessions = new SessionState[maxSessions];
         _messageStorage = GC.AllocateUninitializedArray<byte>(checked(maxSessions * maxMessageBytes));
-        _nextCleanupTicks = DateTime.UtcNow.AddSeconds(30).Ticks;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _nextCleanupTicks = _timeProvider.GetUtcNow().AddSeconds(30).Ticks;
         router.OnDataFrameReceived += HandleDataFrame;
     }
 
     internal void HandleDataFrame(ReadOnlySpan<byte> packet)
     {
         if (packet.Length < 53) return;
-        var now = DateTime.UtcNow.Ticks;
+        var now = _timeProvider.GetUtcNow().Ticks;
         if (now >= _nextCleanupTicks) CleanupExpired(now);
 
         var sourceId = (packet[5] << 16) | (packet[6] << 8) | packet[7];
         var destinationId = (packet[8] << 16) | (packet[9] << 8) | packet[10];
         var hotspotId = BinaryPrimitives.ReadInt32BigEndian(packet[11..15]);
         var dataType = (byte)(packet[15] & 0x0F);
+        if (dataType == 0x03)
+        {
+            if (!DmrServiceIds.IsReserved(destinationId)) return;
+            if (TryGetOrCreateSession(sourceId, destinationId, hotspotId, false, now, out var preambleSlot))
+            {
+                ref var preamble = ref _sessions[preambleSlot];
+                preamble.DestinationId = destinationId;
+                preamble.HotspotId = hotspotId;
+                preamble.IsGroupCall = (packet[15] & 0x40) == 0;
+                preamble.LastSeenTicks = now;
+            }
+            return;
+        }
         if (dataType is < 0x06 or > 0x08) return;
 
         if (dataType == 0x06)
         {
+            Span<byte> decodedHeader = stackalloc byte[12];
+            Bptc19696.Decode(packet.Slice(20, 33), decodedHeader);
+            if ((decodedHeader[0] & 0x0F) == 0x01) return;
             if (TryGetOrCreateSession(sourceId, destinationId, hotspotId, false, now, out var headerSlot))
             {
                 ref var headerSession = ref _sessions[headerSlot];
                 headerSession.Length = 0;
                 headerSession.DestinationId = destinationId;
                 headerSession.HotspotId = hotspotId;
+                headerSession.IsGroupCall = (packet[15] & 0x40) == 0;
                 headerSession.IsConfirmedData = false;
                 headerSession.LastSeenTicks = now;
             }
@@ -114,15 +142,38 @@ public sealed class SdsGateway
             return;
         }
 
+        if (TryDecodeDeliveryReport(message[..session.Length], out var deliveryStatus))
+        {
+            var report = new SdsDeliveryReportEvent(
+                sourceId,
+                session.DestinationId,
+                session.HotspotId,
+                session.IsGroupCall,
+                deliveryStatus,
+                now);
+            OnDeliveryReportReceived?.Invoke(in report);
+            ReleaseSession(slot);
+            return;
+        }
+
         if (TryDecodeMessage(message[..session.Length], out var encoding, out var textBytes))
         {
             var targetId = session.DestinationId;
             var containsLocation = LocationDecoder.LooksLikeLocationText(encoding, textBytes);
             var decodedLocation = LocationDecoder.TryDecodeAnytoneGpsText(encoding, textBytes, out var textLocation);
             var locationEvent = decodedLocation ? CreateLocationEvent(in session, in textLocation) : default;
-            ReleaseSession(slot);
             if (decodedLocation) OnLocationReceived?.Invoke(in locationEvent);
-            PublishSms(sourceId, targetId, encoding, textBytes, containsLocation);
+            var messageEvent = new SdsMessageEvent(
+                sourceId,
+                targetId,
+                session.HotspotId,
+                session.IsGroupCall,
+                encoding,
+                containsLocation,
+                session.StartedAtTicks,
+                now);
+            OnMessageReceived?.Invoke(in messageEvent, textBytes);
+            ReleaseSession(slot);
         }
     }
 
@@ -146,6 +197,8 @@ public sealed class SdsGateway
                 DestinationId = destinationId,
                 HotspotId = hotspotId,
                 IsConfirmedData = isConfirmedData,
+                IsGroupCall = false,
+                StartedAtTicks = now,
                 LastSeenTicks = now,
                 Active = true
             };
@@ -206,30 +259,38 @@ public sealed class SdsGateway
         return false;
     }
 
+    private static bool TryDecodeDeliveryReport(
+        ReadOnlySpan<byte> message, out TmsDeliveryStatus deliveryStatus)
+    {
+        var ipOffset = message.IndexOf((byte)0x45);
+        while (ipOffset >= 0)
+        {
+            var ipv4 = new Ipv4Packet(message[ipOffset..]);
+            if (ipv4.IsValid)
+            {
+                var udp = new UdpDatagram(ipv4.Payload);
+                if (udp.IsValid && (udp.SourcePort == TmsMessageWriter.VendorPort ||
+                                    udp.DestinationPort == TmsMessageWriter.VendorPort) &&
+                    TmsDeliveryReport.TryRead(udp.Payload, out deliveryStatus))
+                    return true;
+            }
+
+            var next = message[(ipOffset + 1)..].IndexOf((byte)0x45);
+            ipOffset = next < 0 ? -1 : ipOffset + 1 + next;
+        }
+
+        deliveryStatus = default;
+        return false;
+    }
+
     internal void PublishSms(
         int sourceId, int destinationId, byte encoding, ReadOnlySpan<byte> textBytes, bool containsLocation = false)
     {
         if (textBytes.IsEmpty) return;
-        try
-        {
-            string text;
-            if (encoding == 0x04)
-            {
-                if ((textBytes.Length & 1) != 0) textBytes = textBytes[..^1];
-                text = Encoding.Unicode.GetString(textBytes);
-            }
-            else text = Encoding.UTF8.GetString(textBytes);
-
-            text = text.Trim('\0', '\r', '\n');
-            if (string.IsNullOrWhiteSpace(text)) return;
-            _logger.LogInformation("SMS von {SourceId} an {DestinationId} (Enc: 0x{Encoding:X2}): {Text}",
-                sourceId, destinationId, encoding, text);
-            OnSmsReceived?.Invoke(sourceId, destinationId, text, containsLocation);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Fehler beim Dekodieren der SMS (Enc: 0x{Encoding:X2})", encoding);
-        }
+        var now = _timeProvider.GetUtcNow().Ticks;
+        var message = new SdsMessageEvent(
+            sourceId, destinationId, 0, false, encoding, containsLocation, now, now);
+        OnMessageReceived?.Invoke(in message, textBytes);
     }
 
     private static DmrLocationEvent CreateLocationEvent(

@@ -1,0 +1,5 @@
+# Einzelner sanitiserter DMRD-Datenframe für einen Routing-Smoke-Test auf TG 9.
+# Dies ist keine vollständige SDS-Transaktion.
+name=Group routing frame to TG 9
+radioId=10001
+0 444D524405002711000009000F4241A6A3E1BE9413ED97E6073B088BA733CF8F058D5D7F77FD757338C1C05A79680661090210199A

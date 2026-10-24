@@ -1,0 +1,119 @@
+= Hardwareergebnis Radio-Check-Resolver und Fallback-SDS vom 21. September 2026
+:toc:
+:sectnums:
+
+== Ergebnis
+
+Der Ein-Master-Lauf bestätigte die neue Heimat-Probe auf Netzwerk- und
+Funkseite: DMRoute-ng erzeugte für das zuvor unbekannte Ziel `10101` genau fünf
+Preambles und einen Radio-Check-Request und sendete sie ausschließlich über den
+anderen angemeldeten Hotspot. Das verwendete Retevis RT3S zeigte jedoch keine
+Radio-Check-Reaktion und erzeugte keine Antwort. Ein Kontrolllauf zum bekannten
+AnyTone `10001` wurde dagegen beim ersten Versuch bestätigt.
+
+Nach einer eigenen Aussendung von `10101` wurde die gepufferte Fallback-SDS
+`Verbindungsversuch von 10201` vom Dienst `990098` auf dem RT3S angezeigt. Das
+Gerät sendete anschließend einen positiven bestätigten DMR-Response-Header,
+aber keinen vom damaligen Stand erkannten TMS-Delivery-Report. Deshalb blieb
+der Outbox-Eintrag während dieses Laufs erhalten. Der Response-Header wurde
+anschließend als Golden Vector übernommen und der bereits beim Echo-Dienst
+verwendete Kompatibilitätspfad auch für Fallback-SDS aktiviert.
+
+== Testaufbau
+
+[cols="2,3",options="header"]
+|===
+|Komponente |Wert
+
+|Master
+|Zone `101`, UDP `62031`
+
+|Physischer Hotspot
+|ID `1010001`, Homebrew/MMDVM, Simplex
+
+|Playground-Hotspot
+|ID `1010010`, Loopback
+
+|Virtuelle Quelle
+|`r1`, DMR-ID `10201`
+
+|Heimatziel
+|Retevis RT3S, DMR-ID `10101`
+
+|Kontrollziel
+|AnyTone, DMR-ID `10001`
+|===
+
+Vor dem Lauf wurde die bestehende Outbox gesichert. Nur `r1` wurde im
+Playground angekündigt; das RT3S blieb vor der ersten Probe ohne eigene
+Aussendung. Netzwerk- und Loopback-Verkehr wurden getrennt mit `tcpdump`
+aufgezeichnet.
+
+== Beobachtungen
+
+=== Heimat-Probe zum unbekannten RT3S
+
+Der Master meldete eine Heimat-Probe von `10201` an `10101` über genau einen
+Hotspot. Im PCAP erschienen sechs ausgehende DMRD-Pakete an den physischen
+Hotspot: fünf Preambles im Abstand von ungefähr 60 ms und anschließend der
+Request. Quell-ID, Ziel-ID, Repeater-ID, Timeslot, Color Code und CSBK stimmen
+mit den zuvor erfassten Golden Vectors überein.
+
+Das RT3S antwortete weder bei der ersten noch bei der wiederholten isolierten
+Probe. Das Playground meldete jeweils nach drei eigenen Versuchen einen
+Timeout. Die drei Versuche erzeugten dank Negativ-Cache und Deduplizierung nur
+einen Outbox-Eintrag für `10201 -> 10101`.
+
+=== Kontrolllauf mit AnyTone
+
+Das AnyTone `10001` war dem Master durch vorherigen Funkverkehr bekannt. Der
+Radio Check `10201 -> 10001` wurde beim ersten Versuch bestätigt. Damit sind
+RF-Pfad, Hotspot, Timeslot und der verwendete Radio-Check-Codec grundsätzlich
+funktionsfähig; der ausbleibende positive Blind-Probe-Abschluss ist auf das
+RT3S beziehungsweise dessen Geräteverhalten begrenzt.
+
+=== Fallback-SDS und Quittung
+
+Nach einer kurzen Aussendung des RT3S auf TG 1 lernte der Master den lokalen
+Pfad zu `10101`. Die SDS von `990098` erreichte das Gerät und wurde auf dessen
+Display angezeigt. Der Capture enthält danach diesen vollständigen DMRD-Frame
+als positiven bestätigten Response-Header:
+
+[source,text]
+----
+444D5244000027750F1B92000F6951E607D8BFAE1333147F07B40A01B173C506458D5D7F77FD75733858E10073D62CA04E9A0C3969
+----
+
+Dabei ist die äußere Quelle `10101`, das Ziel `990098` und der Datentyp ein
+bestätigter Response-Header. Der damalige Fallback-Service wertete nur
+TMS-Delivery-Reports aus, meldete deshalb nach drei Versuchen einen Fehlschlag
+und ließ den Eintrag in der Outbox. Die spätere Codekorrektur akzeptiert wie
+der Echo-Service sowohl den positiven TMS-Report als auch diesen DMR-ACK. Ihre
+Hardware-Wiederholung war nach Ende des begleiteten Laufs noch offen.
+
+== Automatisierte Nachprüfung
+
+Die ergänzten Loopback-Tests decken unabhängig vom Geräteverhalten folgende
+Fälle ab:
+
+* ein unangekündigtes virtuelles Heimatziel antwortet auf die Blind-Probe über
+  den zweiten Hotspot; die Quelle erhält beim ersten Versuch eine Bestätigung,
+* ein fehlendes Ziel erzeugt trotz drei Retries genau einen Outbox-Eintrag,
+* nach späterer Ankündigung wird genau eine Fallback-SDS zugestellt und die
+  positive Quittung entfernt den Eintrag,
+* der erfasste RT3S-Response-Header wird bytegenau als positiver ACK erkannt,
+* die gewärmte Control- und Response-Verarbeitung bleibt allokationsfrei.
+
+== Belege und Restpunkte
+
+Die Rohmitschnitte enthalten lokale Netzwerkdetails und werden nicht
+eingecheckt:
+
+* `/private/tmp/dmroute-radio-resolver-hardware-en0-2026-09-21.pcap`,
+* `/private/tmp/dmroute-radio-resolver-hardware-lo0-2026-09-21.pcap`.
+
+Für die vollständige Hardwareabnahme bleibt eine positive Blind-Probe mit
+einem FuG erforderlich, das Radio Check beantwortet und dessen ID zur Zone 101
+gehört. Außerdem muss der neue DMR-ACK-Kompatibilitätspfad einmal erneut mit dem
+RT3S ausgeführt werden; bis dahin ist nur seine automatisierte Capture-
+Regression bestätigt.

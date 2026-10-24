@@ -72,13 +72,23 @@ public sealed class RoamingRegistry(
 
     public bool TryGetRoamedDeviceZone(int deviceId, out int foreignZoneId)
     {
-        if (_roamingHomeDevices.TryGetValue(deviceId, out var entry))
+        if (TryGetRoamedDevice(deviceId, out foreignZoneId, out _)) return true;
+        foreignZoneId = 0;
+        return false;
+    }
+
+    public bool TryGetRoamedDevice(int deviceId, out int foreignZoneId, out long lastSeenTicks)
+    {
+        if (_roamingHomeDevices.TryGetValue(deviceId, out var entry) &&
+            Volatile.Read(ref entry.LastSeenTicks) >= DateTime.UtcNow.AddMinutes(-15).Ticks)
         {
             foreignZoneId = entry.CurrentZoneId;
+            lastSeenTicks = Volatile.Read(ref entry.LastSeenTicks);
             return true;
         }
 
         foreignZoneId = 0;
+        lastSeenTicks = 0;
         return false;
     }
 
@@ -151,16 +161,35 @@ public sealed class RoamingRegistry(
 
     public bool TryGetLocalGuestEndpoint(int deviceId, out Ipv4Endpoint hotspotEndPoint)
     {
+        if (TryGetLocalGuestRoute(deviceId, out _, out hotspotEndPoint, out _)) return true;
+        hotspotEndPoint = default;
+        return false;
+    }
+
+    public bool TryGetLocalGuestRoute(
+        int deviceId,
+        out int hotspotId,
+        out Ipv4Endpoint hotspotEndPoint,
+        out long lastSeenTicks)
+    {
         lock (_localGuestLock)
         {
             if (_localGuestSlots.TryGetValue(deviceId, out var slot))
             {
-                hotspotEndPoint = _localGuests[slot].HotspotEndPoint;
-                return true;
+                ref readonly var guest = ref _localGuests[slot];
+                if (guest.LastSeenTicks >= DateTime.UtcNow.AddMinutes(-15).Ticks)
+                {
+                    hotspotId = guest.HotspotId;
+                    hotspotEndPoint = guest.HotspotEndPoint;
+                    lastSeenTicks = guest.LastSeenTicks;
+                    return true;
+                }
             }
         }
 
+        hotspotId = 0;
         hotspotEndPoint = default;
+        lastSeenTicks = 0;
         return false;
     }
 

@@ -1,0 +1,348 @@
+= Radio-Check-Resolver, WHOIS und Fallback-SDS
+:toc:
+:sectnums:
+
+== Ziel
+
+Dieser Testplan nimmt den produktiven Radio-Check-Resolver stufenweise ab. Er
+trennt den normalen bekannten Routingpfad von Heimat-Master, Roaming, WHOIS und
+der dauerhaften Fallback-SDS. Dadurch gilt eine positive Anzeige am Funkgerät
+nicht allein als Routingnachweis; Log, Outbox und Paketmitschnitt müssen zum
+erwarteten Pfad passen.
+
+Die erste Etappe verwendet den vorhandenen Master der Zone `101`, das echte FuG
+`10101` und die virtuellen roamenden FuG `10201` bis `10203`. Die zweite Etappe
+benötigt zwei gleichzeitig erreichbare Master. Ein dritter aktiver Master ist
+nicht erforderlich; seine Zone wird für den WHOIS-Fall absichtlich offline
+gelassen.
+
+== Vorhandenes Playground-Profil
+
+Das lokale, nicht eingecheckte `dmroute-playground.json` enthält:
+
+[cols="2,2,2,3",options="header"]
+|===
+|Name |DMR-ID |Hotspot |Verwendung
+
+|`r1`
+|`10201`
+|`hs1` / `1010010`
+|roamende Quelle und echtes Gegenüber
+
+|`r2`
+|`10202`
+|`hs1` / `1010010`
+|zweites roamendes FuG
+
+|`r3`
+|`10203`
+|`hs1` / `1010010`
+|weiteres Diagnosegerät
+
+|`r-local`
+|`10102`
+|`hs1` / `1010010`
+|zunächst unangekündigtes lokales Ziel für die Fallback-SDS
+|===
+
+`r-local` darf vor dem vorgesehenen Schritt weder `radio announce` noch eine
+andere eigene Aussendung durchführen. Der Hotspot kann angemeldet sein; erst
+eigener Verkehr macht die Teilnehmerroute bekannt.
+
+Für den morgigen Master der Zone `102` wird nach Festlegung seiner IPv4-Adresse
+ein getrenntes Profil erzeugt. Es verwendet einen Hotspot der Zone `102`, zum
+Beispiel `1020010`, und mindestens das lokale virtuelle FuG `10201`. Das
+Homebrew-Passwort muss aus dem Zonen-PSK dieses Masters und `1020010`
+zusammengesetzt werden.
+
+== Konfiguration und Aufzeichnung
+
+Die lokale `dmroute.json` aktiviert Resolver und Fallback explizit und verwendet
+`data/radio-check-outbox-zone101.json`. Für jeden weiteren Master wird ein
+eigener Outbox-Pfad verwendet, beispielsweise:
+
+[source,json]
+----
+"RadioCheck": {
+  "Enabled": true,
+  "MaxPending": 128,
+  "FallbackSdsEnabled": true,
+  "FallbackServiceId": 990098,
+  "FallbackTtlHours": 24,
+  "FallbackCapacity": 128,
+  "OutboxPath": "data/radio-check-outbox-zone102.json"
+}
+----
+
+Vor dem Test erhalten die realen Geräte private Kontakte für die beteiligten
+FuG-IDs und einen Kontakt `990098` für den Verbindungsversuch. Frequenz, Color
+Code und Timeslot müssen zu ihrem jeweiligen Hotspot passen.
+
+Jede Etappe erhält ein eigenes Log und PCAP. Befindet sich das Playground auf
+dem Master-Rechner, müssen sowohl das physische Netzwerkinterface als auch
+Loopback beziehungsweise unter macOS ein geeignetes `pktap`-Interface
+aufgezeichnet werden:
+
+[source,shell]
+----
+sudo tcpdump -ni <INTERFACE> -s 0 -U \
+  -w /tmp/dmroute-radio-resolver-<TEST>.pcap \
+  '(udp port 62031 or udp port 42069)'
+----
+
+Nützliche Wireshark-Filter:
+
+[source,text]
+----
+udp.port == 62031
+udp.port == 42069 && udp.payload[0:4] == 44:4d:43:58
+udp.port == 42069 && udp.payload[0:4] == 44:4d:42:43
+udp.port == 42069 && udp.payload[0:4] == 52:4f:41:4d
+----
+
+`DMCX` verwendet an `udp.payload[5]` die Typen `1` Route Query, `2` Route
+Result, `3` Radio Check, `4` Fallback Transfer, `5` Fallback Accepted, `6`
+Fallback Deliver und `7` Fallback Result. Scope `2` an `udp.payload[6]`
+kennzeichnet WHOIS; Status `1` an `udp.payload[7]` bedeutet `Found`.
+
+== Etappe A: heute mit Master Zone 101
+
+=== RCR01: Blind-Probe zum unbekannten echten Heim-FuG
+
+. Master Zone `101` und Playground starten.
+. Nur `r1` als Quelle ankündigen:
+
+[source,text]
+----
+login hs1
+radio announce r1
+----
+
+. Das echte `10101` einschalten, aber seit dem Masterstart nicht senden lassen.
+. Im Playground ausführen:
+
+[source,text]
+----
+radio check r1 10101
+----
+
+Bestanden ist der Test, wenn der Master genau fünf Preambles und einen Request
+an jeden anderen angemeldeten lokalen Hotspot sendet, `10101` antwortet und
+`r1` eine positive Antwort meldet. Der Eingangs-Hotspot darf den Probe nicht
+zurückerhalten; bei Erfolg darf kein WHOIS auftreten.
+
+Der Versuch vom 21. September 2026 bestätigte den Blind-Probe zum physischen
+Hotspot. Das verwendete RT3S mit ID `10101` antwortete jedoch nicht auf den
+Radio Check. Für die positive Abnahme ist daher ein Radio-Check-fähiges FuG in
+Zone 101 erforderlich.
+
+=== RCR02: Echtes Heim-FuG prüft virtuelles Gast-FuG
+
+. Im Playground `radio watch r1` starten.
+. Am echten `10101` die Gerätefunktion *Check Radio* für Kontakt `10201`
+  auslösen.
+
+Bestanden ist der Test, wenn `r1` die Anfrage anzeigt, nach ungefähr 120 ms
+antwortet und das echte Gerät Erfolg meldet. Anfrage und Antwort müssen beide
+den Master passieren.
+
+=== RCR03: Unbekanntes lokales Ziel erzeugt genau einen Fallback
+
+. Sicherstellen, dass `r-local` seit dem Masterstart noch nichts gesendet hat.
+. Von `r1` ausführen:
+
+[source,text]
+----
+radio check r1 10102
+----
+
+. Alle drei Versuche und den endgültigen Timeout abwarten.
+. `data/radio-check-outbox-zone101.json` sichern.
+
+Erwartet werden der normale Timeout am Quellgerät, eine Logmeldung für den
+fehlenden Pfad und genau ein Outbox-Eintrag mit `SourceId=10201`,
+`TargetId=10102` und `HomeZone=101`. Die drei Funkversuche dürfen nicht drei
+Fallback-Nachrichten erzeugen. Mit nur einem Master entsteht kein DMCX-WHOIS-
+Datagramm, weil kein Peer als Empfänger existiert.
+
+=== RCR04: Sichtung löst die bestätigte Fallback-SDS aus
+
+. Das bisher unbekannte Ziel ankündigen:
+
+[source,text]
+----
+radio announce r-local
+sds inbox r-local
+----
+
+Bestanden ist der Test, wenn `r-local` genau diese Nachricht empfängt:
+
+[source,text]
+----
+Verbindungsversuch von 10201
+----
+
+Der Absender muss `990098` sein. Das virtuelle FuG quittiert automatisch per
+TMS-Delivery-Report. Ein echtes FuG darf stattdessen mit einem positiven
+bestätigten DMR-Response-Header quittieren; erst nach einer dieser positiven
+Quittungen muss der Outbox-Eintrag verschwinden. Der ursprüngliche Radio Check
+bleibt trotz der späteren SDS ein Timeout.
+
+=== RCR05: Neustart-Persistenz
+
+. Nach RCR04 mindestens elf Sekunden warten.
+. Playground beenden, Master neu starten und `hs1` sowie nur `r1` wieder
+  anmelden beziehungsweise ankündigen. Dadurch ist die frühere Route zu
+  `r-local` nicht mehr vorhanden.
+. `radio check r1 10102` erneut ausführen und den Outbox-Eintrag sichern.
+. Den Master sauber beenden und mit derselben `dmroute.json` erneut starten.
+. Prüfen, dass der Eintrag noch in der JSON-Outbox steht.
+. Playground erneut verbinden und erst jetzt `radio announce r-local`
+  ausführen.
+
+Bestanden ist der Test, wenn der Eintrag den Neustart überlebt, anschließend
+genau eine SDS zugestellt wird und die Outbox erst nach dem Delivery Report leer
+ist.
+
+== Etappe B: zwei Master
+
+Beide Master müssen unterschiedliche IPv4-Adressen, dasselbe `MeshPsk`, offene
+UDP-Ports `62031` und `42069` sowie eigene Outbox-Dateien besitzen. Nach jedem
+Topologiewechsel werden die beteiligten Master frisch gestartet. Vor Funkverkehr
+mindestens 20 Sekunden auf gegenseitige DMBC-Beacons und den Logeintrag für den
+neuen Peer warten.
+
+=== RCR06: Heimat-Master online
+
+[cols="2,3",options="header"]
+|===
+|Master |Teilnehmer
+
+|Zone `101`
+|physischer Hotspot der Zone 101 mit echtem `10101`
+
+|Zone `102`
+|virtueller Hotspot der Zone 102 mit lokalem `10201`
+|===
+
+. Beide Teilnehmer durch eine eigene Aussendung beziehungsweise `radio
+  announce` bekannt machen.
+. Von `10201` einen Radio Check an `10101` senden.
+
+Erwartet wird normales DMR-Routing zum bekannten Heimat-Master `101`, die echte
+Antwort und deren Rückleitung zu Zone `102`. Ein WHOIS ist nicht erforderlich.
+
+=== RCR07: Heimat-Master verwendet Roaming-Eintrag
+
+[cols="2,3",options="header"]
+|===
+|Master |Teilnehmer
+
+|Zone `100`
+|physischer Hotspot der Zone 100 mit echtem `10101` als Gast
+
+|Zone `101`
+|virtueller Hotspot `1010010` mit lokalem `r-local`/`10102`
+|===
+
+. Beacons abwarten.
+. `10101` auf Zone 100 kurz senden lassen. Dadurch muss ein `ROAM`-Update an
+  Heimat-Master 101 entstehen.
+. `r-local` auf Zone 101 ankündigen und `radio check r-local 10101` ausführen.
+
+Bestanden ist der Test, wenn Zone 101 den Roaming-Eintrag nach Zone 100 nutzt,
+das echte Ziel antwortet und `r-local` die Bestätigung erhält. Das ROAM-Paket
+muss vor dem Radio Check sichtbar sein; WHOIS ist nicht erforderlich.
+
+=== RCR08: Heimat-Master offline, Ziel über WHOIS gefunden
+
+[cols="2,3",options="header"]
+|===
+|Master |Teilnehmer
+
+|Zone `100`
+|physischer Hotspot der Zone 100 mit echtem `10101` als Gast
+
+|Zone `102`
+|virtueller Hotspot der Zone 102 mit lokalem `10201`
+
+|Zone `101`
+|ausgeschaltet
+|===
+
+. Zone 100 und 102 frisch starten und ihre gegenseitige DMBC-Erkennung abwarten.
+. `10101` auf Zone 100 kurz senden lassen.
+. `10201` auf Zone 102 ankündigen und den Radio Check an `10101` auslösen.
+
+Erwartete DMCX-Folge:
+
+. Zone 102 sendet `RouteQuery` mit Scope WHOIS an Zone 100.
+. Nach ungefähr 200 ms darf dieselbe Query wiederholt werden.
+. Zone 100 antwortet mit `RouteResult`, Status `Found`, RouteZone `100`.
+. Zone 102 sendet `RadioCheck` an Zone 100.
+. Zone 100 erzeugt fünf Preambles und den Request zum echten FuG.
+. Die echte Antwort läuft über Zone 100 zurück zum Heimat-Master 102 der Quelle.
+
+Query und Result müssen dieselbe Korrelations-ID tragen. Vom ersten WHOIS bis
+zur Ausführung sollen höchstens ungefähr 700 ms vergehen. Trotz der wiederholten
+Query darf nur eine RF-Control-Transaktion entstehen.
+
+=== RCR09: Ursprungspuffer und Übergabe an Heimat-Master
+
+. Nur Zone 102 mit lokalem `10201` starten; Zone 101 und Ziel `10101` bleiben
+  offline.
+. Radio Check `10201 -> 10101` auslösen, Timeout abwarten und den Eintrag in der
+  Outbox von Zone 102 sichern.
+. Zone 101 ohne physischen Hotspot starten und die DMBC-Erkennung abwarten.
+
+Erwartet werden `FallbackTransfer` von Zone 102 nach Zone 101 und erst nach
+persistierter Speicherung `FallbackAccepted` in Gegenrichtung. Danach ist die
+Outbox von Zone 102 leer und die Nachricht liegt in der Outbox von Zone 101.
+
+Anschließend den physischen Hotspot als Gerät der Zone 101 verbinden und
+`10101` kurz senden lassen. Das echte FuG muss
+`Verbindungsversuch von 10201` vom Dienst `990098` erhalten. Nur ein positiver
+TMS-Delivery-Report darf die Heimat-Outbox leeren. Ohne Quittung bleibt der
+Eintrag bestehen und wird frühestens fünf Minuten später erneut versucht.
+
+== Fehlerzuordnung
+
+[cols="3,5",options="header"]
+|===
+|Beobachtung |Prüfung
+
+|Kein DMBC oder DMCX
+|Mesh-PSK, Layer-2-Erreichbarkeit, Firewall und UDP 42069 prüfen.
+
+|WHOIS Query ohne Result
+|Ziel auf dem antwortenden Master nicht frisch gelernt oder Hotspot nicht mehr angemeldet.
+
+|Result und RadioCheck-DMCX, aber kein RF-Request
+|Lokalen Zielpfad, Hotspotstatus, Color Code und Timeslot am Ziel-Master prüfen.
+
+|Ziel antwortet, Quelle erhält nichts
+|Rückroute zur Heimat-Zone des Quellgeräts und dessen vorherige Ankündigung prüfen.
+
+|Fallback-SDS kommt an, Outbox bleibt gefüllt
+|TMS-Delivery-Report oder bestätigten DMR-Response-Header sowie Kontakt
+`990098` und Geräteverhalten prüfen.
+
+|Mehrere Outbox-Einträge für denselben Vorgang
+|Retry-Deduplizierung ist fehlerhaft; Log, Zeitstempel und IDs sichern.
+|===
+
+== Ergebnisübergabe und Abnahme
+
+Für RCR01 bis RCR09 werden Start-/Endzeit, Geräteanzeige, Master-Logs, PCAP,
+Playground-Ausgabe und die Outbox vor und nach dem Lauf gesichert. Geheimnisse
+und vollständige lokale Konfigurationsdateien werden nicht eingecheckt.
+
+Die Abnahme ist erfolgreich, wenn:
+
+* bekannte lokale, Heimat- und Roaming-Pfade ohne WHOIS funktionieren,
+* der Offline-Heimatfall genau die beschriebene Query/Result/Command-Folge zeigt,
+* nur das echte beziehungsweise virtuelle Ziel-FuG positiv bestätigt,
+* drei Funk-Retries höchstens eine Fallback-Nachricht erzeugen,
+* die Outbox einen Neustart und die Übergabe an den Heimat-Master überlebt,
+* nur ein positives TMS-Delivery-Result oder ein positiver bestätigter
+  DMR-Response-Header den Eintrag löscht.

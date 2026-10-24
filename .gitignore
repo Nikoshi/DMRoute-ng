@@ -27,6 +27,8 @@ Temporary Items
 
 /src/DMRoute_ng/obj
 /src/DMRoute_ng/bin
+/src/DMRoute_ng.Protocol/obj
+/src/DMRoute_ng.Protocol/bin
 
 /tests/DMRoute_ng.Tests/obj
 /tests/DMRoute_ng.Tests/bin
@@ -35,3 +37,19 @@ Temporary Items
 # Standalone developer and test tools
 /tools/**/obj
 /tools/**/bin
+
+# Generated documentation
+/artifacts/docs/
+/.bundle/
+
+# Local hardware and protocol captures
+/captures/
+*.pcap
+*.pcapng
+
+# Local runtime credentials
+/dmroute.json
+/dmroute-playground.json
+
+# Local persistent runtime state
+/data/

@@ -23,6 +23,11 @@ gesendet. Die `0x03`-CSBK-Frames kündigen die Datenübertragung lediglich an. D
 eigentliche NMEA-Satz befindet sich in den anschließend reassemblierten
 `0x06`/`0x07`-Datenblöcken.
 
+`990099` ist zugleich das Ziel des lokalen SDS-Echo-Dienstes. Der Gateway
+dekodiert Location-Telemetrie weiterhin vor der Dienstauswahl. Der Echo-Dienst
+akzeptiert ausschließlich passende UTF-16LE-TMS-Befehle mit dem Präfix `ECHO `
+und ignoriert NMEA-Nachrichten.
+
 Der Decoder erkennt `$GPRMC` und `$GNRMC`, prüft die NMEA-XOR-Prüfsumme und liest
 Fixstatus, Breite, Länge, Geschwindigkeit und Kurs. Geschwindigkeit wird von Knoten
 in Meter pro Sekunde umgerechnet. Bei Status `V` wird ein Ereignis mit
@@ -63,8 +68,8 @@ Value-Type-Ereignisses sind Teil des Hot Paths. Sie verwenden keine Strings, kei
 LINQ und keine wachsenden Puffer. JSON-Erzeugung, die optionale Rasterung und TCP-I/O
 laufen im MQTT-Background-Service.
 
-Eine manuell gesendete GPS-Information bleibt lokal als SMS protokollierbar. Bei
-aktivierter MQTT-Privacy wird der Nachrichteninhalt auf dem Broker durch
+Eine manuell gesendete GPS-Information durchläuft zusätzlich den normalen
+SMS-Publisher. Bei aktivierter MQTT-Privacy wird ihr Nachrichteninhalt auf dem Broker durch
 `[GPS position redacted]` ersetzt. Bereits die erkannte `Template:`-Signatur löst
 die Redaction aus; auch ein beschädigter GPS-Text darf seine Koordinaten daher nicht
 versehentlich als normale MQTT-SMS veröffentlichen.

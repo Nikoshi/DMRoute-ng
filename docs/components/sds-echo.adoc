@@ -1,0 +1,86 @@
+= SDS-Echo-Dienst
+:toc:
+:sectnums:
+
+== Zweck und Adressierung
+
+Der lokale Echo-Dienst prüft den vollständigen bestätigten SDS-Sendeweg vom
+Master zurück zu einem Funkgerät. Die DMR-Ziele `990000` bis `999999` sind für
+lokale Dienste reserviert. Pakete an diese Ziele werden nicht an andere Hotspots
+oder ins Mesh weitergeleitet; Pakete mit einer reservierten Quell-ID werden
+verworfen.
+
+Der Echo-Dienst verwendet TG `990099`. Diese Ziel-ID wird auch von der getesteten
+AnyTone-Location-Telemetrie verwendet. Die beiden Eingaben bleiben kompatibel:
+Location-Nachrichten werden weiterhin dekodiert, während der Echo-Dienst nur
+passende UTF-16LE-TMS-Befehle verarbeitet.
+
+== Befehl und Antwort
+
+Akzeptiert wird eine Gruppen-SDS von einer fünfstelligen Teilnehmer-ID mit
+TMS-Encoding `0x04` und dem exakt großgeschriebenen Präfix `ECHO `:
+
+[source,text]
+----
+ECHO <Text>
+----
+
+Leerer Text, andere Encodings, private Befehle und unbekannte Inhalte werden
+ignoriert. Erfolgreiche Eingaben erhalten nach 500 ms eine bestätigte private
+SDS vom Dienst `990099`:
+
+[source,text]
+----
+ECHO <Text> | RX <Millisekunden> ms
+----
+
+`RX` misst vom ersten zugehörigen CSBK bis zur vollständig reassemblierten
+Nachricht. Der Text ist auf 120 UTF-16-Codeeinheiten begrenzt. Bei Überlänge
+lautet die Antwort:
+
+[source,text]
+----
+ERROR text too long (max 120) | RX <Millisekunden> ms
+----
+
+Identische Befehle desselben Absenders werden innerhalb von 30 Sekunden nur
+einmal beantwortet.
+
+== Bestätigter Versand
+
+Eine Antwort besteht aus fünf CSBK-Preambles, einem bestätigten Datenheader und
+den Rate-3/4-Datenblöcken des TMS-Datagramms. Zwischen den Bursts liegen 60 ms.
+Der Dienst wartet anschließend bis zu drei Sekunden auf den positiven privaten
+TMS-Zustellbericht `00 03 BF 00 01` des Funkgeräts. Der ältere einzelne
+DMR-Response-Header wird weiterhin als ACK/NACK-Fallback akzeptiert. Bei Timeout
+oder negativer Antwort wird die vollständige
+Transaktion höchstens zweimal wiederholt, also insgesamt maximal dreimal
+gesendet.
+
+Antworten werden nacheinander durch einen begrenzten Background-Worker
+verarbeitet. Ist der ursprüngliche Hotspot nicht mehr angemeldet, wird nicht an
+einen anderen Endpunkt ausgewichen.
+
+== Konfiguration und Beobachtbarkeit
+
+[cols="2,1,3",options="header"]
+|===
+|Schlüssel |Standard |Bedeutung
+
+|`Services:Echo:Enabled`
+|`true`
+|Aktiviert die Annahme und Beantwortung gültiger Echo-Befehle.
+|===
+
+Echo-Befehle werden als lokaler Dienstverkehr nicht unter `sds/sms` an MQTT
+publiziert. Der Dienst protokolliert bestätigte Antworten, nicht erreichbare
+Hotspots und nach drei Versuchen unbestätigte Antworten über source-generierte
+Logmeldungen.
+
+== Grenzen
+
+Der Echo-Dienst ist die erste hardwaretestbare Nutzung des ausgehenden
+SDS-Transports. Eine allgemeine authentifizierte Sendeschnittstelle ist in Issue
+#24 geplant; eine darauf aufbauende CLI folgt in Issue #25. Parallel laufende
+ausgehende bestätigte SDS und ein öffentliches Zustellstatusmodell gehören nicht
+zum aktuellen Funktionsumfang.

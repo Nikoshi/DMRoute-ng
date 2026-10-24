@@ -30,6 +30,24 @@ internal sealed class DiagnosticFrameSlot
     }
 }
 
+internal sealed class SmsMessageSlot
+{
+    private int _inUse;
+
+    public SmsMessageSlot(int capacity) => Buffer = GC.AllocateUninitializedArray<byte>(capacity, pinned: true);
+
+    public byte[] Buffer { get; }
+    public int Length { get; set; }
+
+    public bool TryRent() => Interlocked.CompareExchange(ref _inUse, 1, 0) == 0;
+
+    public void Release()
+    {
+        Length = 0;
+        Volatile.Write(ref _inUse, 0);
+    }
+}
+
 internal readonly struct MqttTelemetryEvent
 {
     private MqttTelemetryEvent(
@@ -41,7 +59,9 @@ internal readonly struct MqttTelemetryEvent
         int hotspotId,
         byte dataType,
         long occurredAtTicks,
-        string? message,
+        byte encoding,
+        bool containsLocation,
+        SmsMessageSlot? smsMessage,
         DiagnosticFrameSlot? diagnosticFrame)
     {
         EventType = eventType;
@@ -52,7 +72,9 @@ internal readonly struct MqttTelemetryEvent
         HotspotId = hotspotId;
         DataType = dataType;
         OccurredAtTicks = occurredAtTicks;
-        Message = message;
+        Encoding = encoding;
+        ContainsLocation = containsLocation;
+        SmsMessage = smsMessage;
         DiagnosticFrame = diagnosticFrame;
     }
 
@@ -64,42 +86,51 @@ internal readonly struct MqttTelemetryEvent
     public int HotspotId { get; }
     public byte DataType { get; }
     public long OccurredAtTicks { get; }
-    public string? Message { get; }
+    public byte Encoding { get; }
+    public bool ContainsLocation { get; }
+    public SmsMessageSlot? SmsMessage { get; }
     public DiagnosticFrameSlot? DiagnosticFrame { get; }
 
     public static MqttTelemetryEvent ForCall(in DmrCallEvent call) =>
-        new(MqttTelemetryEventType.Call, call, default, 0, 0, 0, 0, 0, null, null);
+        new(MqttTelemetryEventType.Call, call, default, 0, 0, 0, 0, 0, 0, false, null, null);
 
-    public static MqttTelemetryEvent ForSms(int sourceId, int destinationId, string message, long occurredAtTicks) =>
-        new(MqttTelemetryEventType.Sms, default, default, sourceId, destinationId, 0, 0, occurredAtTicks, message, null);
+    public static MqttTelemetryEvent ForSms(
+        in SdsMessageEvent message, SmsMessageSlot slot) =>
+        new(MqttTelemetryEventType.Sms, default, default, message.SourceId, message.DestinationId,
+            message.HotspotId, 0, message.CompletedAtTicks, message.Encoding, message.ContainsLocation, slot, null);
 
     public static MqttTelemetryEvent ForLocation(in DmrLocationEvent location) =>
-        new(MqttTelemetryEventType.Location, default, location, 0, 0, 0, 0, 0, null, null);
+        new(MqttTelemetryEventType.Location, default, location, 0, 0, 0, 0, 0, 0, false, null, null);
 
     public static MqttTelemetryEvent ForDiagnostic(
         int sourceId, int hotspotId, byte dataType, long occurredAtTicks, DiagnosticFrameSlot slot) =>
         new(MqttTelemetryEventType.DiagnosticFrame, default, default, sourceId, 0, hotspotId, dataType,
-            occurredAtTicks, null, slot);
+            occurredAtTicks, 0, false, null, slot);
 }
 
 internal sealed class MqttTelemetryQueue
 {
     private readonly DiagnosticFrameSlot[] _diagnosticSlots;
+    private readonly SmsMessageSlot[] _smsSlots;
     private readonly Channel<MqttTelemetryEvent> _eventChannel;
     private readonly Channel<MqttTelemetryEvent> _diagnosticChannel;
     private long _droppedEvents;
 
-    public MqttTelemetryQueue(int eventCapacity, int diagnosticFrameCapacity, int maxDiagnosticFrameBytes)
+    public MqttTelemetryQueue(
+        int eventCapacity, int diagnosticFrameCapacity, int maxDiagnosticFrameBytes, int maxSmsMessageBytes = 4096)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(eventCapacity);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(diagnosticFrameCapacity);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxDiagnosticFrameBytes);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSmsMessageBytes);
 
         // One slot may be in-flight in the single reader and another staging slot
         // lets a new frame enter a full DropOldest channel before eviction releases a slot.
         _diagnosticSlots = new DiagnosticFrameSlot[checked(diagnosticFrameCapacity + 2)];
         for (var i = 0; i < _diagnosticSlots.Length; i++)
             _diagnosticSlots[i] = new DiagnosticFrameSlot(maxDiagnosticFrameBytes);
+        _smsSlots = new SmsMessageSlot[checked(eventCapacity + 2)];
+        for (var i = 0; i < _smsSlots.Length; i++) _smsSlots[i] = new SmsMessageSlot(maxSmsMessageBytes);
 
         _eventChannel = Channel.CreateBounded<MqttTelemetryEvent>(new BoundedChannelOptions(eventCapacity)
         {
@@ -123,8 +154,30 @@ internal sealed class MqttTelemetryQueue
 
     public void EnqueueCall(in DmrCallEvent call) => _eventChannel.Writer.TryWrite(MqttTelemetryEvent.ForCall(call));
 
-    public void EnqueueSms(int sourceId, int destinationId, string message, long occurredAtTicks) =>
-        _eventChannel.Writer.TryWrite(MqttTelemetryEvent.ForSms(sourceId, destinationId, message, occurredAtTicks));
+    public void EnqueueSms(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes)
+    {
+        SmsMessageSlot? rented = null;
+        for (var i = 0; i < _smsSlots.Length; i++)
+        {
+            if (!_smsSlots[i].TryRent()) continue;
+            rented = _smsSlots[i];
+            break;
+        }
+        if (rented is null || textBytes.Length > rented.Buffer.Length)
+        {
+            rented?.Release();
+            Interlocked.Increment(ref _droppedEvents);
+            return;
+        }
+
+        textBytes.CopyTo(rented.Buffer);
+        rented.Length = textBytes.Length;
+        if (!_eventChannel.Writer.TryWrite(MqttTelemetryEvent.ForSms(in message, rented)))
+        {
+            rented.Release();
+            Interlocked.Increment(ref _droppedEvents);
+        }
+    }
 
     public void EnqueueLocation(in DmrLocationEvent location) =>
         _eventChannel.Writer.TryWrite(MqttTelemetryEvent.ForLocation(location));
@@ -158,7 +211,11 @@ internal sealed class MqttTelemetryQueue
         }
     }
 
-    public static void Release(in MqttTelemetryEvent item) => item.DiagnosticFrame?.Release();
+    public static void Release(in MqttTelemetryEvent item)
+    {
+        item.DiagnosticFrame?.Release();
+        item.SmsMessage?.Release();
+    }
 
     private void OnDropped(MqttTelemetryEvent item)
     {

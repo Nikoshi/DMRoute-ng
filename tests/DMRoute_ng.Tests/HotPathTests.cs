@@ -2,12 +2,14 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using DMRoute_ng.Coding;
 using DMRoute_ng.Configuration;
 using DMRoute_ng.Core;
 using DMRoute_ng.Gateways;
 using DMRoute_ng.Integration;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Routing;
+using DMRoute_ng.Services;
 using DMRoute_ng.Types;
 using DMRoute_ng.Utils;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -211,6 +213,51 @@ public sealed class HotPathTests
         for (var i = 0; i < 100; i++) gateway.HandleDataFrame(packet);
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 1000; i++) gateway.HandleDataFrame(packet);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    public void WarmedConfirmedResponseParsing_AllocatesNoManagedBytes()
+    {
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
+        DmrBurstWriter.WriteConfirmedResponseHeader(
+            burst, 10101, DmrServiceIds.ConnectionAttempt, 1, true, 1);
+        DmrBurstWriter.WriteDmrd(
+            packet, burst, 1, 10101, DmrServiceIds.ConnectionAttempt, 1010001, 0x06, 42);
+
+        for (var i = 0; i < 100; i++)
+            DmrBurstWriter.TryReadConfirmedResponse(
+                packet, 10101, DmrServiceIds.ConnectionAttempt, out _);
+        var matched = 0;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            if (DmrBurstWriter.TryReadConfirmedResponse(
+                    packet, 10101, DmrServiceIds.ConnectionAttempt, out var acknowledged) && acknowledged)
+                matched++;
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(1000, matched);
+    }
+
+    [Fact]
+    public void WarmedSdsDeliveryReportIngestion_AllocatesNoManagedBytes()
+    {
+        using var fixture = new RouterFixture();
+        var gateway = new SdsGateway(NullLogger<SdsGateway>.Instance, fixture.Router, 4, 256);
+        gateway.OnDeliveryReportReceived += static (in SdsDeliveryReportEvent _) => { };
+        var frames = BuildDeliveryReportFrames();
+
+        for (var i = 0; i < 100; i++)
+            foreach (var frame in frames) gateway.HandleDataFrame(frame);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+            foreach (var frame in frames) gateway.HandleDataFrame(frame);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);
@@ -464,6 +511,31 @@ public sealed class HotPathTests
         packet[10] = (byte)destinationId;
         BinaryPrimitives.WriteInt32BigEndian(packet[11..15], repeaterId);
         packet[15] = flags;
+    }
+
+    private static byte[][] BuildDeliveryReportFrames()
+    {
+        Span<byte> datagram = stackalloc byte[64];
+        Assert.True(TmsMessageWriter.TryWriteDeliveryReport(datagram, 10003, DmrServiceIds.Echo, 1, out var length));
+        Span<byte> fragment = stackalloc byte[48];
+        datagram[..length].CopyTo(fragment);
+        BinaryPrimitives.WriteUInt32LittleEndian(fragment[44..], DmrCrc.MessageCrc32(fragment[..44]));
+
+        var frames = new byte[4][];
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        frames[0] = new byte[DmrBurstWriter.DmrdLength];
+        DmrBurstWriter.WriteConfirmedDataHeader(burst, 10003, DmrServiceIds.Echo, 3, 11, 0, 1);
+        DmrBurstWriter.WriteDmrd(frames[0], burst, 0, 10003, DmrServiceIds.Echo, 1000001, 0x06, 42);
+        for (byte block = 0; block < 3; block++)
+        {
+            frames[block + 1] = new byte[DmrBurstWriter.DmrdLength];
+            DmrBurstWriter.WriteConfirmedRateThreeQuarterBlock(
+                burst, fragment.Slice(block * 16, 16), block, 1);
+            DmrBurstWriter.WriteDmrd(
+                frames[block + 1], burst, (byte)(block + 1), 10003, DmrServiceIds.Echo,
+                1000001, 0x08, 42);
+        }
+        return frames;
     }
 
     private static async Task<MqttPacket> ReadMqttPacket(NetworkStream stream, CancellationToken token)
