@@ -228,6 +228,163 @@ public sealed class HomebrewEmulatorTests
     }
 
     [Fact]
+    public async Task VirtualRadios_RoundTripCallAlertAndRadioCheck()
+    {
+        await using var fixture = await DmrLoopbackFixture.StartAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var sourceHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001) with
+        {
+            ReceiveQueueCapacity = 64
+        });
+        await using var targetHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000002) with
+        {
+            ReceiveQueueCapacity = 64
+        });
+        await using var source = new VirtualRadio(sourceHotspot, new VirtualRadioOptions { RadioId = 10001 });
+        await using var target = new VirtualRadio(targetHotspot, new VirtualRadioOptions { RadioId = 10002 });
+        await sourceHotspot.LoginAsync(timeout.Token);
+        await targetHotspot.LoginAsync(timeout.Token);
+        await target.AnnounceAsync(timeout.Token);
+
+        var callAlertFrames = 0;
+        var radioCheckFrames = 0;
+        var countRadioCheck = false;
+        targetHotspot.DmrdReceived += CountControlFrames;
+
+        var alertResult = await source.SendCallAlertAsync(10002, timeout.Token);
+        var alertRequest = await target.ReceiveControlEventAsync(timeout.Token);
+        var alertAck = await source.ReceiveControlEventAsync(timeout.Token);
+        countRadioCheck = true;
+        var checkResult = await source.CheckRadioAsync(10002, timeout.Token);
+        var checkRequest = await target.ReceiveControlEventAsync(timeout.Token);
+        var checkAck = await source.ReceiveControlEventAsync(timeout.Token);
+
+        Assert.Equal(new RadioControlSendResult(RadioControlSendStatus.Acknowledged, 1), alertResult);
+        Assert.Equal(RadioControlEventType.CallAlertRequest, alertRequest.Type);
+        Assert.Equal(RadioControlEventType.CallAlertAcknowledgement, alertAck.Type);
+        Assert.Equal(new RadioControlSendResult(RadioControlSendStatus.Acknowledged, 1), checkResult);
+        Assert.Equal(RadioControlEventType.RadioCheckRequest, checkRequest.Type);
+        Assert.Equal(RadioControlEventType.RadioCheckAcknowledgement, checkAck.Type);
+        Assert.Equal(10001, checkRequest.SourceId);
+        Assert.Equal(10002, checkRequest.DestinationId);
+        Assert.Equal(5, Volatile.Read(ref callAlertFrames));
+        Assert.Equal(6, Volatile.Read(ref radioCheckFrames));
+        return;
+
+        void CountControlFrames(HomebrewDatagram datagram)
+        {
+            if (!HomebrewProtocol.TryReadDmrdInfo(datagram.Payload, out var info) ||
+                info.SourceId != 10001 || info.DestinationId != 10002 || info.DataType != 0x03)
+                return;
+            if (Volatile.Read(ref countRadioCheck)) Interlocked.Increment(ref radioCheckFrames);
+            else Interlocked.Increment(ref callAlertFrames);
+        }
+    }
+
+    [Fact]
+    public async Task VirtualRadio_ControlRequestsRetryAndReportTimeout()
+    {
+        await using var fixture = await DmrLoopbackFixture.StartAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var hotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001));
+        await using var radio = new VirtualRadio(hotspot, new VirtualRadioOptions
+        {
+            RadioId = 10001,
+            MaximumAttempts = 2,
+            ResponseTimeout = TimeSpan.FromMilliseconds(50)
+        });
+        await hotspot.LoginAsync(timeout.Token);
+
+        var result = await radio.CheckRadioAsync(10099, timeout.Token);
+
+        Assert.Equal(RadioControlSendStatus.TimedOut, result.Status);
+        Assert.Equal(2, result.Attempts);
+    }
+
+    [Fact]
+    public async Task VirtualRadio_IgnoresControlRequestsOnAnotherTimeslot()
+    {
+        await using var fixture = await DmrLoopbackFixture.StartAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var sourceHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001));
+        await using var targetHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000002));
+        await using var source = new VirtualRadio(sourceHotspot, new VirtualRadioOptions
+        {
+            RadioId = 10001,
+            Timeslot = 1,
+            MaximumAttempts = 1,
+            ResponseTimeout = TimeSpan.FromMilliseconds(50)
+        });
+        await using var target = new VirtualRadio(targetHotspot, new VirtualRadioOptions
+        {
+            RadioId = 10002,
+            Timeslot = 2
+        });
+        await sourceHotspot.LoginAsync(timeout.Token);
+        await targetHotspot.LoginAsync(timeout.Token);
+        await target.AnnounceAsync(timeout.Token);
+
+        var result = await source.SendCallAlertAsync(10002, timeout.Token);
+
+        Assert.Equal(RadioControlSendStatus.TimedOut, result.Status);
+        Assert.Equal(0, target.UnreadControlEvents);
+    }
+
+    [Fact]
+    public async Task VirtualRadio_ControlInboxDropsOldestEventWhenFull()
+    {
+        await using var fixture = await DmrLoopbackFixture.StartAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var sourceHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001));
+        await using var targetHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000002));
+        await using var source = new VirtualRadio(sourceHotspot, new VirtualRadioOptions { RadioId = 10001 });
+        await using var target = new VirtualRadio(targetHotspot, new VirtualRadioOptions
+        {
+            RadioId = 10002,
+            InboxCapacity = 1
+        });
+        await sourceHotspot.LoginAsync(timeout.Token);
+        await targetHotspot.LoginAsync(timeout.Token);
+        await target.AnnounceAsync(timeout.Token);
+
+        await source.SendCallAlertAsync(10002, timeout.Token);
+        await source.CheckRadioAsync(10002, timeout.Token);
+
+        Assert.Equal(1, target.UnreadControlEvents);
+        Assert.Equal(1, target.DroppedControlEvents);
+        Assert.True(target.TryReceiveControlEvent(out var latest));
+        Assert.Equal(RadioControlEventType.RadioCheckRequest, latest.Type);
+        Assert.Equal(0, target.ClearControlEvents());
+    }
+
+    [Fact]
+    public async Task WarmedVirtualRadioControlIngestion_AllocatesNoManagedBytes()
+    {
+        var radio = new VirtualRadio(10001);
+        try
+        {
+            var method = typeof(VirtualRadio).GetMethod(
+                "HandleDmrd", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            var handle = (Action<HomebrewDatagram>)method.CreateDelegate(typeof(Action<HomebrewDatagram>), radio);
+            var packet = BuildRadioCheckAcknowledgement();
+            var datagram = new HomebrewDatagram(packet, DateTimeOffset.UnixEpoch);
+            for (var i = 0; i < 100; i++) handle(datagram);
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 1000; i++) handle(datagram);
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(0, allocated);
+            Assert.Equal(1, radio.UnreadControlEvents);
+        }
+        finally
+        {
+            await radio.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task VirtualRadio_PrivateSdsRetriesAndReportsTimeout()
     {
         await using var fixture = await DmrLoopbackFixture.StartAsync();
@@ -278,6 +435,182 @@ public sealed class HomebrewEmulatorTests
         Assert.Equal(10001, reply.DestinationId);
         Assert.StartsWith("ECHO Playground | RX ", reply.Text, StringComparison.Ordinal);
         Assert.EndsWith(" ms", reply.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VirtualRadio_ReceivesAndConfirmsFallbackConnectionAttempt()
+    {
+        await using var fixture = await DmrLoopbackFixture.StartAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var settings = ConfigurationTests.ValidSettings() with
+        {
+            Sds = new SdsSettings { MaxSessions = 8, MaxMessageBytes = 512 },
+            RadioCheck = new RadioCheckSettings { FallbackCapacity = 8 }
+        };
+        var gateway = new SdsGateway(
+            NullLogger<SdsGateway>.Instance, fixture.Router, 8, 512);
+        using var fallback = new FallbackSdsService(
+            NullLogger<FallbackSdsService>.Instance, fixture.Router, fixture.Sender, settings);
+        using var services = new SdsServiceRegistry(gateway, [fallback]);
+        await fallback.StartAsync(timeout.Token);
+        await using var hotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001));
+        await using var radio = new VirtualRadio(hotspot, new VirtualRadioOptions { RadioId = 10001 });
+        await hotspot.LoginAsync(timeout.Token);
+        await radio.AnnounceAsync(timeout.Token);
+        Assert.True(fixture.Router.TryGetAnyLocalTarget(10001, out var route));
+        var completion = new TaskCompletionSource<FallbackSdsDelivery>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fallback.DeliveryCompleted += Complete;
+        var request = new FallbackSdsRequest(42, 100, 10101, 10001, route);
+
+        Assert.True(fallback.TryQueue(in request));
+        var message = await radio.ReceiveSdsAsync(timeout.Token);
+        var delivery = await completion.Task.WaitAsync(timeout.Token);
+        await fallback.StopAsync(timeout.Token);
+
+        Assert.Equal(settings.RadioCheck.FallbackServiceId, message.SourceId);
+        Assert.Equal(10001, message.DestinationId);
+        Assert.Equal("Verbindungsversuch von 10101", message.Text);
+        Assert.Equal(42UL, delivery.MessageId);
+        Assert.True(delivery.Delivered);
+        return;
+
+        void Complete(in FallbackSdsDelivery result) => completion.TrySetResult(result);
+    }
+
+    [Fact]
+    public async Task UnknownHomeRadio_IsFoundByBlindProbeWithoutFallback()
+    {
+        var directory = ConfigurationTests.CreateTemporaryDirectory();
+        try
+        {
+            await using var fixture = await DmrLoopbackFixture.StartAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            var settings = CreateRadioCheckSettings(directory);
+            var outbox = new RadioCheckOutbox(
+                NullLogger<RadioCheckOutbox>.Instance,
+                settings.RadioCheck.OutboxPath,
+                settings.RadioCheck.FallbackCapacity,
+                DateTime.UtcNow.Ticks);
+            var gateway = new SdsGateway(NullLogger<SdsGateway>.Instance, fixture.Router, 8, 512);
+            using var fallback = new FallbackSdsService(
+                NullLogger<FallbackSdsService>.Instance, fixture.Router, fixture.Sender, settings);
+            using var services = new SdsServiceRegistry(gateway, [fallback]);
+            using var coordinator = new RadioCheckReachabilityCoordinator(
+                NullLogger<RadioCheckReachabilityCoordinator>.Instance,
+                fixture.Router,
+                fixture.Repeaters,
+                fixture.Masters,
+                fixture.Roaming,
+                fixture.Mesh,
+                fixture.Sender,
+                fallback,
+                outbox,
+                settings);
+            await fallback.StartAsync(timeout.Token);
+            await coordinator.StartAsync(timeout.Token);
+            try
+            {
+                await using var sourceHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001));
+                await using var targetHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000002));
+                await using var source = new VirtualRadio(sourceHotspot, new VirtualRadioOptions { RadioId = 10001 });
+                await using var target = new VirtualRadio(targetHotspot, new VirtualRadioOptions { RadioId = 10002 });
+                await sourceHotspot.LoginAsync(timeout.Token);
+                await targetHotspot.LoginAsync(timeout.Token);
+                await source.AnnounceAsync(timeout.Token);
+                var targetControlFrames = 0;
+                targetHotspot.DmrdReceived += CountControlFrames;
+
+                var result = await source.CheckRadioAsync(10002, timeout.Token);
+                await WaitUntilAsync(() => Volatile.Read(ref targetControlFrames) >= 6, timeout.Token);
+
+                Assert.Equal(new RadioControlSendResult(RadioControlSendStatus.Acknowledged, 1), result);
+                Assert.Equal(6, Volatile.Read(ref targetControlFrames));
+                Assert.Equal(0, outbox.Count);
+
+                void CountControlFrames(HomebrewDatagram datagram)
+                {
+                    if (HomebrewProtocol.TryReadDmrdInfo(datagram.Payload, out var info) && info.DataType == 0x03)
+                        Interlocked.Increment(ref targetControlFrames);
+                }
+            }
+            finally
+            {
+                await coordinator.StopAsync(CancellationToken.None);
+                await fallback.StopAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedBlindProbe_QueuesOneFallbackAndDeliversAfterTargetAppears()
+    {
+        var directory = ConfigurationTests.CreateTemporaryDirectory();
+        try
+        {
+            await using var fixture = await DmrLoopbackFixture.StartAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var settings = CreateRadioCheckSettings(directory);
+            var outbox = new RadioCheckOutbox(
+                NullLogger<RadioCheckOutbox>.Instance,
+                settings.RadioCheck.OutboxPath,
+                settings.RadioCheck.FallbackCapacity,
+                DateTime.UtcNow.Ticks);
+            var gateway = new SdsGateway(NullLogger<SdsGateway>.Instance, fixture.Router, 8, 512);
+            using var fallback = new FallbackSdsService(
+                NullLogger<FallbackSdsService>.Instance, fixture.Router, fixture.Sender, settings);
+            using var services = new SdsServiceRegistry(gateway, [fallback]);
+            using var coordinator = new RadioCheckReachabilityCoordinator(
+                NullLogger<RadioCheckReachabilityCoordinator>.Instance,
+                fixture.Router,
+                fixture.Repeaters,
+                fixture.Masters,
+                fixture.Roaming,
+                fixture.Mesh,
+                fixture.Sender,
+                fallback,
+                outbox,
+                settings);
+            await fallback.StartAsync(timeout.Token);
+            await coordinator.StartAsync(timeout.Token);
+            try
+            {
+                await using var sourceHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000001));
+                await using var targetHotspot = new VirtualHotspot(CreateOptions(fixture.EndPoint, 1000002));
+                await using var source = new VirtualRadio(sourceHotspot, new VirtualRadioOptions { RadioId = 10001 });
+                await sourceHotspot.LoginAsync(timeout.Token);
+                await targetHotspot.LoginAsync(timeout.Token);
+                await source.AnnounceAsync(timeout.Token);
+
+                var result = await source.CheckRadioAsync(10002, timeout.Token);
+                await WaitUntilAsync(() => outbox.Count == 1, timeout.Token);
+
+                Assert.Equal(new RadioControlSendResult(RadioControlSendStatus.TimedOut, 3), result);
+                Assert.Equal(1, outbox.Count);
+
+                await using var target = new VirtualRadio(targetHotspot, new VirtualRadioOptions { RadioId = 10002 });
+                await target.AnnounceAsync(timeout.Token);
+                var message = await target.ReceiveSdsAsync(timeout.Token);
+                await WaitUntilAsync(() => outbox.Count == 0, timeout.Token);
+
+                Assert.Equal(settings.RadioCheck.FallbackServiceId, message.SourceId);
+                Assert.Equal(10002, message.DestinationId);
+                Assert.Equal("Verbindungsversuch von 10001", message.Text);
+            }
+            finally
+            {
+                await coordinator.StopAsync(CancellationToken.None);
+                await fallback.StopAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -383,6 +716,51 @@ public sealed class HomebrewEmulatorTests
         Assert.Contains("src=10001 dst=9 repeater=1000001", text);
         Assert.Contains("target: abgemeldet", text);
         Assert.DoesNotContain("secret1000001", text);
+    }
+
+    [Fact]
+    public async Task PlaygroundRepl_SendsAndDisplaysControlTransactions()
+    {
+        await using var fixture = await DmrLoopbackFixture.StartAsync();
+        var settings = new PlaygroundSettings
+        {
+            Master = new PlaygroundMasterSettings
+            {
+                Host = fixture.EndPoint.Address.ToString(),
+                Port = fixture.EndPoint.Port
+            },
+            Hotspots =
+            [
+                CreatePlaygroundHotspot("source", 1000001),
+                CreatePlaygroundHotspot("target", 1000002)
+            ],
+            Radios =
+            [
+                new PlaygroundRadioSettings { Name = "r1", RadioId = 10001, Hotspot = "source" },
+                new PlaygroundRadioSettings { Name = "r2", RadioId = 10002, Hotspot = "target" }
+            ]
+        };
+        await using var playground = new PlaygroundRepl(settings, fixture.EndPoint);
+        var output = new StringWriter();
+        var commands = string.Join(Environment.NewLine,
+            "login all",
+            "radio announce r2",
+            "radio alert r1 10002",
+            "radio check r1 10002",
+            "radio events r1",
+            "radio events r2",
+            "exit") + Environment.NewLine;
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await playground.RunAsync(new StringReader(commands), output, timeout.Token);
+
+        var text = output.ToString();
+        Assert.Contains("r1: Call Alert nach 1 Versuch(en) bestätigt", text);
+        Assert.Contains("r1: Radio Check nach 1 Versuch(en) bestätigt", text);
+        Assert.Contains("Call Alert Bestätigung 10002 -> 10001", text);
+        Assert.Contains("Radio Check Bestätigung 10002 -> 10001", text);
+        Assert.Contains("Call Alert Anfrage 10001 -> 10002", text);
+        Assert.Contains("Radio Check Anfrage 10001 -> 10002", text);
     }
 
     [Fact]
@@ -499,6 +877,30 @@ public sealed class HomebrewEmulatorTests
         ReceiveQueueCapacity = 16
     };
 
+    private static DmRouteSettings CreateRadioCheckSettings(string directory) =>
+        ConfigurationTests.ValidSettings() with
+        {
+            ZoneId = 100,
+            Sds = new SdsSettings { MaxSessions = 8, MaxMessageBytes = 512 },
+            RadioCheck = new RadioCheckSettings
+            {
+                Enabled = true,
+                MaxPending = 16,
+                FallbackSdsEnabled = true,
+                FallbackCapacity = 8,
+                OutboxPath = Path.Combine(directory, "radio-check-outbox.json")
+            }
+        };
+
+    private static byte[] BuildRadioCheckAcknowledgement()
+    {
+        var packet = new byte[DmrBurstWriter.DmrdLength];
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        DmrBurstWriter.WriteRadioCheckAcknowledgement(burst, 10101, 10001, 1);
+        DmrBurstWriter.WriteDmrd(packet, burst, 1, 10101, 10001, 1000001, 0x03, 1);
+        return packet;
+    }
+
     private static PlaygroundHotspotSettings CreatePlaygroundHotspot(string name, int repeaterId) => new()
     {
         Name = name,
@@ -540,6 +942,9 @@ public sealed class HomebrewEmulatorTests
 
         public RepeaterRegistry Repeaters { get; }
         public MicroSubnetRouter Router => _router;
+        public MasterRegistry Masters => _masters;
+        public RoamingRegistry Roaming => _roaming;
+        public MeshDiscoveryService Mesh => _mesh;
         public IDmrSender Sender => _server;
         public IPEndPoint EndPoint { get; private set; } = null!;
 

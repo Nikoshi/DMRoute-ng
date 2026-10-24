@@ -23,6 +23,13 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         EchoEnabled,
         MaxActiveCalls,
         MaxLocalDeviceRoutes,
+        RadioCheckEnabled,
+        RadioCheckMaxPending,
+        FallbackSdsEnabled,
+        FallbackServiceId,
+        FallbackTtlHours,
+        FallbackCapacity,
+        FallbackOutboxPath,
         MaxSdsSessions,
         MaxSdsMessageBytes,
         StateIntervalSeconds,
@@ -48,6 +55,13 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         .. BasicFields,
         Field.MaxActiveCalls,
         Field.MaxLocalDeviceRoutes,
+        Field.RadioCheckEnabled,
+        Field.RadioCheckMaxPending,
+        Field.FallbackSdsEnabled,
+        Field.FallbackServiceId,
+        Field.FallbackTtlHours,
+        Field.FallbackCapacity,
+        Field.FallbackOutboxPath,
         Field.MaxSdsSessions,
         Field.MaxSdsMessageBytes,
         Field.StateIntervalSeconds,
@@ -98,7 +112,8 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
                 case ConsoleKey.S:
                     if (TrySave(path, settings, out status)) return SetupResult.Saved;
                     break;
-                case ConsoleKey.Spacebar when fields[selected] is Field.LocationPrivacyEnabled or Field.EchoEnabled:
+                case ConsoleKey.Spacebar when fields[selected] is Field.LocationPrivacyEnabled or Field.EchoEnabled or
+                    Field.RadioCheckEnabled or Field.FallbackSdsEnabled:
                     if (fields[selected] == Field.EchoEnabled)
                     {
                         settings = settings with
@@ -106,6 +121,25 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
                             Services = settings.Services with
                             {
                                 Echo = settings.Services.Echo with { Enabled = !settings.Services.Echo.Enabled }
+                            }
+                        };
+                        break;
+                    }
+                    if (fields[selected] == Field.RadioCheckEnabled)
+                    {
+                        settings = settings with
+                        {
+                            RadioCheck = settings.RadioCheck with { Enabled = !settings.RadioCheck.Enabled }
+                        };
+                        break;
+                    }
+                    if (fields[selected] == Field.FallbackSdsEnabled)
+                    {
+                        settings = settings with
+                        {
+                            RadioCheck = settings.RadioCheck with
+                            {
+                                FallbackSdsEnabled = !settings.RadioCheck.FallbackSdsEnabled
                             }
                         };
                         break;
@@ -151,7 +185,7 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
 
     private DmRouteSettings Edit(DmRouteSettings settings, Field field, out string status)
     {
-        if (field is Field.LocationPrivacyEnabled or Field.EchoEnabled)
+        if (field is Field.LocationPrivacyEnabled or Field.EchoEnabled or Field.RadioCheckEnabled or Field.FallbackSdsEnabled)
         {
             status = string.Empty;
             if (field == Field.EchoEnabled)
@@ -160,6 +194,19 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
                     Services = settings.Services with
                     {
                         Echo = settings.Services.Echo with { Enabled = !settings.Services.Echo.Enabled }
+                    }
+                };
+            if (field == Field.RadioCheckEnabled)
+                return settings with
+                {
+                    RadioCheck = settings.RadioCheck with { Enabled = !settings.RadioCheck.Enabled }
+                };
+            if (field == Field.FallbackSdsEnabled)
+                return settings with
+                {
+                    RadioCheck = settings.RadioCheck with
+                    {
+                        FallbackSdsEnabled = !settings.RadioCheck.FallbackSdsEnabled
                     }
                 };
             return settings with
@@ -246,6 +293,13 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.EchoEnabled => "SDS echo service",
         Field.MaxActiveCalls => "Max active calls",
         Field.MaxLocalDeviceRoutes => "Max local device routes",
+        Field.RadioCheckEnabled => "Radio Check resolver",
+        Field.RadioCheckMaxPending => "Max pending Radio Checks",
+        Field.FallbackSdsEnabled => "Radio Check fallback SDS",
+        Field.FallbackServiceId => "Fallback SDS service ID",
+        Field.FallbackTtlHours => "Fallback SDS TTL (hours)",
+        Field.FallbackCapacity => "Fallback SDS capacity",
+        Field.FallbackOutboxPath => "Fallback SDS outbox path",
         Field.MaxSdsSessions => "Max SDS sessions",
         Field.MaxSdsMessageBytes => "Max SDS message bytes",
         Field.StateIntervalSeconds => "MQTT state interval (s)",
@@ -261,6 +315,8 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.ZonePsk or Field.MeshPsk => "********",
         Field.LocationPrivacyEnabled => settings.Mqtt.LocationPrivacyEnabled ? "[*] enabled" : "[ ] disabled",
         Field.EchoEnabled => settings.Services.Echo.Enabled ? "[*] enabled" : "[ ] disabled",
+        Field.RadioCheckEnabled => settings.RadioCheck.Enabled ? "[*] enabled" : "[ ] disabled",
+        Field.FallbackSdsEnabled => settings.RadioCheck.FallbackSdsEnabled ? "[*] enabled" : "[ ] disabled",
         _ => CurrentValue(settings, field)
     };
 
@@ -276,6 +332,13 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.EchoEnabled => settings.Services.Echo.Enabled.ToString(CultureInfo.InvariantCulture),
         Field.MaxActiveCalls => settings.Routing.MaxActiveCalls.ToString(CultureInfo.InvariantCulture),
         Field.MaxLocalDeviceRoutes => settings.Routing.MaxLocalDeviceRoutes.ToString(CultureInfo.InvariantCulture),
+        Field.RadioCheckEnabled => settings.RadioCheck.Enabled.ToString(CultureInfo.InvariantCulture),
+        Field.RadioCheckMaxPending => settings.RadioCheck.MaxPending.ToString(CultureInfo.InvariantCulture),
+        Field.FallbackSdsEnabled => settings.RadioCheck.FallbackSdsEnabled.ToString(CultureInfo.InvariantCulture),
+        Field.FallbackServiceId => settings.RadioCheck.FallbackServiceId.ToString(CultureInfo.InvariantCulture),
+        Field.FallbackTtlHours => settings.RadioCheck.FallbackTtlHours.ToString(CultureInfo.InvariantCulture),
+        Field.FallbackCapacity => settings.RadioCheck.FallbackCapacity.ToString(CultureInfo.InvariantCulture),
+        Field.FallbackOutboxPath => settings.RadioCheck.OutboxPath,
         Field.MaxSdsSessions => settings.Sds.MaxSessions.ToString(CultureInfo.InvariantCulture),
         Field.MaxSdsMessageBytes => settings.Sds.MaxMessageBytes.ToString(CultureInfo.InvariantCulture),
         Field.StateIntervalSeconds => settings.Mqtt.StateIntervalSeconds.ToString(CultureInfo.InvariantCulture),
@@ -296,6 +359,26 @@ internal sealed class SetupWizard(ISetupTerminal terminal)
         Field.LocationGridKm => settings with { Mqtt = settings.Mqtt with { LocationGridKm = ParseDouble(input) } },
         Field.MaxActiveCalls => settings with { Routing = settings.Routing with { MaxActiveCalls = ParseInt(input) } },
         Field.MaxLocalDeviceRoutes => settings with { Routing = settings.Routing with { MaxLocalDeviceRoutes = ParseInt(input) } },
+        Field.RadioCheckMaxPending => settings with
+        {
+            RadioCheck = settings.RadioCheck with { MaxPending = ParseInt(input) }
+        },
+        Field.FallbackServiceId => settings with
+        {
+            RadioCheck = settings.RadioCheck with { FallbackServiceId = ParseInt(input) }
+        },
+        Field.FallbackTtlHours => settings with
+        {
+            RadioCheck = settings.RadioCheck with { FallbackTtlHours = ParseInt(input) }
+        },
+        Field.FallbackCapacity => settings with
+        {
+            RadioCheck = settings.RadioCheck with { FallbackCapacity = ParseInt(input) }
+        },
+        Field.FallbackOutboxPath => settings with
+        {
+            RadioCheck = settings.RadioCheck with { OutboxPath = input }
+        },
         Field.MaxSdsSessions => settings with { Sds = settings.Sds with { MaxSessions = ParseInt(input) } },
         Field.MaxSdsMessageBytes => settings with { Sds = settings.Sds with { MaxMessageBytes = ParseInt(input) } },
         Field.StateIntervalSeconds => settings with { Mqtt = settings.Mqtt with { StateIntervalSeconds = ParseInt(input) } },

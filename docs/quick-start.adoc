@@ -71,8 +71,9 @@ sollten bewusst gesetzt werden:
 * `MQTT host` und `MQTT port`,
 * `Location privacy` und `Location grid (km)`.
 
-Der erweiterte Bereich enthält die vorab reservierten Kapazitäten und den
-Schalter `SDS echo service`. Die erzeugte Datei enthält die PSKs im Klartext und
+Der erweiterte Bereich enthält die vorab reservierten Kapazitäten und die
+Schalter für SDS-Echo, Radio-Check-Resolver und Fallback-SDS sowie deren TTL,
+Kapazität und Outbox-Pfad. Die erzeugte Datei enthält die PSKs im Klartext und
 erhält unter Unix den Modus `0600`.
 
 == Hotspot einrichten
@@ -184,11 +185,18 @@ radio announce all
 sds send radio1 tg 9 "Hallo Gruppe"
 sds send radio1 fug 10002 "Hallo Funkgerät"
 sds inbox radio1
+radio alert radio1 10002
+radio check radio1 10002
+radio events radio1
 ----
 
 Eine TG-SDS ist unbestätigt. Eine private SDS wartet auf ACK beziehungsweise
-NACK und wird bei einem Timeout höchstens dreimal versucht. Für Nachrichten an
+NACK und wird bei einem Timeout höchstens dreimal versucht. Für private SDS an
 ein reales FuG muss dessen Route dem Master bereits durch vorherigen Funkverkehr
-bekannt sein. Profilformat, alle REPL-Befehle und die Besonderheit, dass
+bekannt sein. Ein Radio Check kann einen fehlenden Pfad dagegen über
+Heimat-Master, Roaming und Mesh-WHOIS suchen. Call Alert und Radio Check warten ebenfalls höchstens drei
+Versuche auf die capture-verifizierte Bestätigung; eingehende Anfragen
+beantwortet das virtuelle Funkgerät automatisch. Profilformat, alle
+REPL-Befehle und die Besonderheit, dass
 Gruppenverkehr nicht zum Ursprungshotspot zurückläuft, beschreibt die
 link:components/emulator.adoc[Emulator-Dokumentation].

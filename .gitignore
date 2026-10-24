@@ -40,6 +40,7 @@ Temporary Items
 
 # Generated documentation
 /artifacts/docs/
+/.bundle/
 
 # Local hardware and protocol captures
 /captures/
@@ -49,3 +50,6 @@ Temporary Items
 # Local runtime credentials
 /dmroute.json
 /dmroute-playground.json
+
+# Local persistent runtime state
+/data/

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using DMRoute_ng.Coding;
 using DMRoute_ng.Core;
 using DMRoute_ng.Registry;
 using DMRoute_ng.Services;
@@ -10,6 +11,25 @@ namespace DMRoute_ng.Routing;
 public delegate void DmrDataFrameHandler(ReadOnlySpan<byte> packet);
 public delegate void DmrCallEventHandler(in DmrCallEvent callEvent);
 public delegate void DmrUnknownFrameHandler(ReadOnlySpan<byte> packet, int sourceId, int hotspotId, byte dataType, long occurredAtTicks);
+public delegate void RadioCheckRouteMissHandler(in RadioCheckRouteMiss routeMiss);
+public delegate void RadioCheckAcknowledgementHandler(in RadioCheckAcknowledgement acknowledgement);
+
+public readonly record struct RadioCheckRouteMiss(
+    int SourceId,
+    int TargetId,
+    int SourceHotspotId,
+    long OccurredAtTicks);
+
+public readonly record struct RadioCheckAcknowledgement(
+    int SourceId,
+    int DestinationId,
+    long OccurredAtTicks);
+
+public readonly record struct RadioTargetRoute(
+    int HotspotId,
+    Ipv4Endpoint EndPoint,
+    byte ColorCode,
+    long LastSeenTicks);
 
 public enum DmrCallEventType : byte
 {
@@ -52,6 +72,12 @@ public readonly struct ActiveCallSnapshot(
 
 public sealed partial class MicroSubnetRouter : IDisposable
 {
+    private readonly struct LocalDeviceRoute(int hotspotId, long lastSeenTicks)
+    {
+        public readonly int HotspotId = hotspotId;
+        public readonly long LastSeenTicks = lastSeenTicks;
+    }
+
     private readonly struct CallState(
         int dstId,
         int hotspotId,
@@ -86,7 +112,8 @@ public sealed partial class MicroSubnetRouter : IDisposable
     private readonly int _maxLocalDeviceRoutes;
     private readonly int _maxActiveCalls;
 
-    private readonly Dictionary<int, int> _localDeviceRouting;
+    private readonly Dictionary<int, LocalDeviceRoute> _localDeviceRouting;
+    private readonly object _localRoutesLock = new();
     private readonly Dictionary<int, CallState> _activeCalls;
     private readonly object _activeCallsLock = new();
     private readonly ExpiredCall[] _expiredCalls;
@@ -99,6 +126,8 @@ public sealed partial class MicroSubnetRouter : IDisposable
     public event DmrDataFrameHandler? OnDataFrameReceived;
     public event DmrCallEventHandler? OnCallEvent;
     public event DmrUnknownFrameHandler? OnUnknownFrameReceived;
+    public event RadioCheckRouteMissHandler? OnRadioCheckRouteMiss;
+    public event RadioCheckAcknowledgementHandler? OnRadioCheckAcknowledgement;
 
     public long DroppedLocalRouteStates => Interlocked.Read(ref _droppedLocalRouteStates);
     public long DroppedCallStates => Interlocked.Read(ref _droppedCallStates);
@@ -135,7 +164,7 @@ public sealed partial class MicroSubnetRouter : IDisposable
         _masterZoneId = masterZoneId;
         _maxActiveCalls = maxActiveCalls;
         _maxLocalDeviceRoutes = maxLocalDeviceRoutes;
-        _localDeviceRouting = new Dictionary<int, int>(maxLocalDeviceRoutes);
+        _localDeviceRouting = new Dictionary<int, LocalDeviceRoute>(maxLocalDeviceRoutes);
         _activeCalls = new Dictionary<int, CallState>(maxActiveCalls);
         _expiredCalls = new ExpiredCall[maxActiveCalls];
         _cleanupTimer = new Timer(CleanupStaleCalls, null, 2000, 2000);
@@ -201,6 +230,15 @@ public sealed partial class MicroSubnetRouter : IDisposable
         HandleSignaling(packet, srcId, dstId, repeaterId, isGroupCall, dataType);
         if (isDataFrame) OnDataFrameReceived?.Invoke(packet);
 
+        DmrControlMessage controlMessage = default;
+        var hasControlMessage = dataType == 0x03 &&
+                                DmrBurstWriter.TryReadControlMessage(packet, out controlMessage);
+        if (hasControlMessage && controlMessage.Type == DmrControlMessageType.RadioCheckAcknowledgement)
+        {
+            var acknowledgement = new RadioCheckAcknowledgement(srcId, dstId, DateTime.UtcNow.Ticks);
+            OnRadioCheckAcknowledgement?.Invoke(in acknowledgement);
+        }
+
         if (isGroupCall)
         {
             foreach (var peer in _registry.GetRoutingSnapshot())
@@ -222,53 +260,132 @@ public sealed partial class MicroSubnetRouter : IDisposable
             return;
         }
 
+        var routed = false;
         var targetHomeZone = dstId / 100;
         if (targetHomeZone == _masterZoneId)
         {
-            if (_localDeviceRouting.TryGetValue(dstId, out var targetRepeaterId) &&
-                _registry.TryGetExisting(targetRepeaterId, out var targetRepeater) && targetRepeater.EndPoint is { } localTarget)
+            if (TryGetLocalHomeTarget(dstId, out var localRoute))
             {
-                sender.SendTo(packet, localTarget);
+                sender.SendTo(packet, localRoute.EndPoint);
+                routed = true;
             }
             else if (_roamingRegistry.TryGetRoamedDeviceZone(dstId, out var foreignZoneId) &&
                      _masterRegistry.TryGet(foreignZoneId, out var foreignMaster))
             {
                 sender.SendTo(packet, foreignMaster.DataEndPoint);
+                routed = true;
             }
-            else if (dataType is 0x01 or 0x03)
+            else if (dataType == 0x01)
             {
                 LogUnknownLocalTarget(_logger, dstId);
             }
         }
-        else if (_roamingRegistry.TryGetLocalGuestEndpoint(dstId, out var guestEndpoint))
+        else if (TryGetLocalGuestTarget(dstId, out var guestRoute))
         {
-            sender.SendTo(packet, guestEndpoint);
+            sender.SendTo(packet, guestRoute.EndPoint);
+            routed = true;
         }
         else if (_masterRegistry.TryGet(targetHomeZone, out var targetMaster))
         {
             sender.SendTo(packet, targetMaster.DataEndPoint);
+            routed = true;
             if (dataType == 0x01) LogMeshPrivateCall(_logger, srcId, dstId, targetHomeZone);
         }
-        else if (dataType is 0x01 or 0x03)
+        else if (dataType == 0x01)
         {
             LogUnknownRemoteTarget(_logger, dstId, targetHomeZone);
+        }
+
+        if (!routed && hasControlMessage && controlMessage.Type == DmrControlMessageType.RadioCheckRequest)
+        {
+            var routeMiss = new RadioCheckRouteMiss(srcId, dstId, repeaterId, DateTime.UtcNow.Ticks);
+            OnRadioCheckRouteMiss?.Invoke(in routeMiss);
         }
     }
 
     private void LearnLocalRoute(int sourceId, int repeaterId)
     {
-        if (_localDeviceRouting.TryGetValue(sourceId, out _))
+        var route = new LocalDeviceRoute(repeaterId, DateTime.UtcNow.Ticks);
+        lock (_localRoutesLock)
         {
-            _localDeviceRouting[sourceId] = repeaterId;
-            return;
+            if (_localDeviceRouting.TryGetValue(sourceId, out _))
+            {
+                _localDeviceRouting[sourceId] = route;
+                return;
+            }
+
+            if (_localDeviceRouting.Count >= _maxLocalDeviceRoutes)
+            {
+                Interlocked.Increment(ref _droppedLocalRouteStates);
+                return;
+            }
+            _localDeviceRouting.Add(sourceId, route);
+        }
+    }
+
+    public bool TryGetAnyLocalTarget(int deviceId, out RadioTargetRoute route) =>
+        TryGetLocalGuestTarget(deviceId, out route) || TryGetLocalHomeTarget(deviceId, out route);
+
+    public bool TryGetHomeRouteCandidate(int deviceId, out int routeZone, out long lastSeenTicks)
+    {
+        routeZone = 0;
+        lastSeenTicks = 0;
+        if (deviceId / 100 != _masterZoneId) return false;
+
+        if (TryGetLocalHomeTarget(deviceId, out var local))
+        {
+            routeZone = _masterZoneId;
+            lastSeenTicks = local.LastSeenTicks;
         }
 
-        if (_localDeviceRouting.Count >= _maxLocalDeviceRoutes)
+        if (_roamingRegistry.TryGetRoamedDevice(deviceId, out var roamingZone, out var roamingSeen) &&
+            roamingSeen > lastSeenTicks)
         {
-            Interlocked.Increment(ref _droppedLocalRouteStates);
-            return;
+            routeZone = roamingZone;
+            lastSeenTicks = roamingSeen;
         }
-        _localDeviceRouting.Add(sourceId, repeaterId);
+
+        return routeZone != 0;
+    }
+
+    private bool TryGetLocalHomeTarget(int deviceId, out RadioTargetRoute route)
+    {
+        LocalDeviceRoute state;
+        lock (_localRoutesLock)
+        {
+            if (!_localDeviceRouting.TryGetValue(deviceId, out state) ||
+                state.LastSeenTicks < DateTime.UtcNow.AddMinutes(-15).Ticks)
+            {
+                route = default;
+                return false;
+            }
+        }
+
+        if (_registry.TryGetExisting(state.HotspotId, out var repeater) &&
+            repeater.State == RepeaterState.LoggedIn && repeater.EndPoint is { } endpoint)
+        {
+            route = new RadioTargetRoute(
+                state.HotspotId, endpoint, (byte)(repeater.Configuration?.ColorCode ?? 1), state.LastSeenTicks);
+            return true;
+        }
+
+        route = default;
+        return false;
+    }
+
+    private bool TryGetLocalGuestTarget(int deviceId, out RadioTargetRoute route)
+    {
+        if (_roamingRegistry.TryGetLocalGuestRoute(deviceId, out var hotspotId, out var endpoint, out var lastSeen) &&
+            _registry.TryGetExisting(hotspotId, out var repeater) && repeater.State == RepeaterState.LoggedIn &&
+            repeater.EndPoint == endpoint)
+        {
+            route = new RadioTargetRoute(
+                hotspotId, endpoint, (byte)(repeater.Configuration?.ColorCode ?? 1), lastSeen);
+            return true;
+        }
+
+        route = default;
+        return false;
     }
 
     public int CopyActiveCalls(Span<ActiveCallSnapshot> destination)

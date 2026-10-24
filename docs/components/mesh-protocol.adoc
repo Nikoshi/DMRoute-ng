@@ -8,7 +8,7 @@ Der `MeshDiscoveryService` verwaltet die dezentrale Erkennung von Zonen-Mastern 
 
 == Pakettypen
 
-Das Protokoll verwendet zwei proprietäre Pakettypen:
+Das Protokoll verwendet drei Paketfamilien:
 
 * **DMBC (Beacon):** Ein UDP-Broadcast mit 50 Bytes. Der Master sendet ihn alle
   15 Sekunden. Enthalten sind Zonen-ID, DMR-Datenport, UTC-Ticks und die Signatur.
@@ -18,6 +18,11 @@ Das Protokoll verwendet zwei proprietäre Pakettypen:
   eines fremden Teilnehmers. Enthalten sind Teilnehmer-ID, Aufenthaltszone,
   UTC-Ticks und die Signatur. Ein gültiger Empfang aktualisiert die
   `RoamingRegistry`.
+* **DMCX (Mesh-Steuerung):** Ein fester UDP-Unicast mit 96 Bytes für
+  Heimat-/Bestätigungsabfragen, WHOIS-Antworten, die Ausführung eines Radio
+  Checks sowie Übergabe, Zustellung und Quittierung der Fallback-SDS. Ein
+  WHOIS-Broadcast ist ein direkter Fanout an bekannte Peers und wird nicht
+  weitergeleitet.
 
 == Sicherheit & Validierung
 
@@ -26,6 +31,9 @@ Das Protokoll verwendet zwei proprietäre Pakettypen:
 * **Zeitfenster:** Jedes Paket enthält UTC-Ticks. Pakete mit mehr als 30 Sekunden
   Abweichung zur lokalen Systemzeit werden verworfen. Die Systemuhren der Master
   müssen deshalb synchronisiert sein.
+* **Peer-Bindung:** DMCX-Pakete werden nur angenommen, wenn die angegebene
+  Ursprungszone bereits bekannt ist und die IPv4-Absenderadresse zu ihrem
+  Registry-Eintrag passt.
 
 == Übergabe aus dem DMR-Routing
 

@@ -14,6 +14,7 @@
 ## Verification
 
 - Build and test through the project Makefile: `make test` (Release is the default configuration).
+- On this host, .NET/MSBuild may fail inside the sandbox while binding its local IPC socket with `SocketException (13): Permission denied`. In that case, rerun the same build or test command outside the sandbox instead of treating it as a product failure.
 - Add warmed allocation regression tests using `GC.GetAllocatedBytesForCurrentThread()` for any changed hot path.
 - Do not describe a path as zero-allocation unless an allocation test covers it.
 - Preserve protocol byte layouts and add focused tests for packet writers and parsers.

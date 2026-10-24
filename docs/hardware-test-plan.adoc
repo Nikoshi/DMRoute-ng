@@ -230,6 +230,15 @@ Ein-Hotspot-Befund ist im
 link:hardware-test-results-2026-09-13-radio-check.adoc[Radio-Check-Hardwarebericht]
 dokumentiert.
 
+Ein antwortorientierter Ein-Hotspot-Lauf vom 21. September 2026 hat inzwischen
+Request und positive Antwort für Radio Check sowie Call Alert vollständig
+erfasst. Die Bytefelder und die weiterhin offene bidirektionale Messreihe stehen
+im link:hardware-test-results-2026-09-21-control.adoc[Control-Hardwarebericht].
+
+Die Abnahme des darauf aufbauenden Heimat-/Roaming-/WHOIS-Resolvers und der
+persistenten Fallback-SDS beschreibt der
+link:radio-check-resolver-hardware-plan.adoc[Radio-Check-Resolver-Testplan].
+
 === H10: SDS-Echo-Dienst
 
 Dieser Schritt verwendet zunächst den funktionierenden Hotspot. Für den
@@ -263,6 +272,7 @@ Nach dem letzten Schritt zuerst `tcpdump` und danach den Master mit `Ctrl+C` bee
 * `/tmp/dmroute-hardware.pcap`,
 * bei H08 die MQTT-Payloads von `sds/gps` und `sds/sms`,
 * bei H09 die im Radio-Check-Capture-Plan genannten zwölf Einzel-PCAPs,
+* die PCAPs, Logs und Outbox-Snapshots aus dem Radio-Check-Resolver-Testplan,
 * bei H10 die Echo-PCAPs und notierten Antworten beider Funkgeräte,
 * die notierten Uhrzeiten und das Ergebnis je Schritt (`OK`, `Fehler` oder `nicht ausgeführt`),
 * Hotspot-Modell, Software/Firmware und verwendete Hotspot-ID,

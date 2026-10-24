@@ -18,6 +18,8 @@ public sealed class SdsCodecTests
         "03223697255A495224314323058D5D7F77FD75733810044471D40C830A4409B5D1";
     private const string CapturedFirstBlock =
         "2E32A22FECF9E282222228B2063D5D7F77FD757A872E24222E3D23B8222275EBE5";
+    private const string CapturedRt3sFallbackAcknowledgement =
+        "444D5244000027750F1B92000F6951E607D8BFAE1333147F07B40A01B173C506458D5D7F77FD75733858E10073D62CA04E9A0C3969";
 
     [Fact]
     public void TmsWriter_ReproducesCapturedUtf16LittleEndianDatagram()
@@ -53,6 +55,282 @@ public sealed class SdsCodecTests
         Assert.Equal(
             "037134AD07800A5037C14B62458D5D7F77FD757338E8010872762E03431C013144",
             Convert.ToHexString(response));
+    }
+
+    [Fact]
+    public void ConfirmedResponseParser_AcceptsCapturedRt3sFallbackAcknowledgement()
+    {
+        var packet = Convert.FromHexString(CapturedRt3sFallbackAcknowledgement);
+
+        Assert.True(DmrBurstWriter.TryReadConfirmedResponse(
+            packet, 10101, 990098, out var acknowledged));
+        Assert.True(acknowledged);
+        Assert.False(DmrBurstWriter.TryReadConfirmedResponse(packet, 10102, 990098, out _));
+        Assert.False(DmrBurstWriter.TryReadConfirmedResponse(packet, 10101, 990097, out _));
+    }
+
+    [Fact]
+    public async Task FallbackSds_AcceptsDmrResponseHeaderAsDeliveryConfirmation()
+    {
+        using var fixture = new Fixture();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var settings = ConfigurationTests.ValidSettings() with
+        {
+            RadioCheck = new RadioCheckSettings { FallbackCapacity = 8 }
+        };
+        var sender = new FallbackAcknowledgingSender(fixture.Router, fixture.Endpoint);
+        using var fallback = new FallbackSdsService(
+            NullLogger<FallbackSdsService>.Instance, fixture.Router, sender, settings);
+        var completion = new TaskCompletionSource<FallbackSdsDelivery>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fallback.DeliveryCompleted += Complete;
+        await fallback.StartAsync(timeout.Token);
+        var route = new RadioTargetRoute(1000001, fixture.Endpoint, 1, DateTime.UtcNow.Ticks);
+        var request = new FallbackSdsRequest(42, 100, 10101, 10001, route);
+
+        Assert.True(fallback.TryQueue(in request));
+        var delivery = await completion.Task.WaitAsync(timeout.Token);
+        await fallback.StopAsync(timeout.Token);
+
+        Assert.True(delivery.Delivered);
+        Assert.Equal(42UL, delivery.MessageId);
+        Assert.True(sender.SendCount >= 7);
+        return;
+
+        void Complete(in FallbackSdsDelivery result) => completion.TrySetResult(result);
+    }
+
+    [Fact]
+    public async Task FallbackSds_AcceptsResponseDuringLateGracePeriod()
+    {
+        using var fixture = new Fixture();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var settings = ConfigurationTests.ValidSettings() with
+        {
+            RadioCheck = new RadioCheckSettings { FallbackCapacity = 8 }
+        };
+        var sender = new DelayedFallbackResponseSender(
+            fixture.Router,
+            fixture.Endpoint,
+            TimeSpan.FromMilliseconds(30),
+            acknowledged: true,
+            responseSourceId: 10001,
+            responseDestinationId: DmrServiceIds.ConnectionAttempt);
+        using var fallback = new FallbackSdsService(
+            NullLogger<FallbackSdsService>.Instance,
+            fixture.Router,
+            sender,
+            settings,
+            null,
+            FastFallbackTiming());
+        var completion = new TaskCompletionSource<FallbackSdsDelivery>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fallback.DeliveryCompleted += Complete;
+        await fallback.StartAsync(timeout.Token);
+        var route = new RadioTargetRoute(1000001, fixture.Endpoint, 1, DateTime.UtcNow.Ticks);
+        var request = new FallbackSdsRequest(43, 100, 10101, 10001, route);
+
+        Assert.True(fallback.TryQueue(in request));
+        var delivery = await completion.Task.WaitAsync(timeout.Token);
+        await sender.ResponseSent.WaitAsync(timeout.Token);
+        await fallback.StopAsync(timeout.Token);
+
+        Assert.True(delivery.Delivered);
+        Assert.Equal(3, sender.HeaderCount);
+        return;
+
+        void Complete(in FallbackSdsDelivery result) => completion.TrySetResult(result);
+    }
+
+    [Theory]
+    [InlineData(false, 10001, DmrServiceIds.ConnectionAttempt)]
+    [InlineData(true, 10002, DmrServiceIds.ConnectionAttempt)]
+    [InlineData(true, 10001, 990097)]
+    public async Task FallbackSds_RejectsLateNackOrMismatchedResponse(
+        bool acknowledged,
+        int responseSourceId,
+        int responseDestinationId)
+    {
+        using var fixture = new Fixture();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var settings = ConfigurationTests.ValidSettings() with
+        {
+            RadioCheck = new RadioCheckSettings { FallbackCapacity = 8 }
+        };
+        var sender = new DelayedFallbackResponseSender(
+            fixture.Router,
+            fixture.Endpoint,
+            TimeSpan.FromMilliseconds(30),
+            acknowledged,
+            responseSourceId,
+            responseDestinationId);
+        using var fallback = new FallbackSdsService(
+            NullLogger<FallbackSdsService>.Instance,
+            fixture.Router,
+            sender,
+            settings,
+            null,
+            FastFallbackTiming());
+        var completion = new TaskCompletionSource<FallbackSdsDelivery>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fallback.DeliveryCompleted += Complete;
+        await fallback.StartAsync(timeout.Token);
+        var route = new RadioTargetRoute(1000001, fixture.Endpoint, 1, DateTime.UtcNow.Ticks);
+        var request = new FallbackSdsRequest(44, 100, 10101, 10001, route);
+
+        Assert.True(fallback.TryQueue(in request));
+        var delivery = await completion.Task.WaitAsync(timeout.Token);
+        await sender.ResponseSent.WaitAsync(timeout.Token);
+        await fallback.StopAsync(timeout.Token);
+
+        Assert.False(delivery.Delivered);
+        Assert.Equal(3, sender.HeaderCount);
+        return;
+
+        void Complete(in FallbackSdsDelivery result) => completion.TrySetResult(result);
+    }
+
+    [Fact]
+    public async Task FallbackSds_FailsAfterLateGraceWithoutResponse()
+    {
+        using var fixture = new Fixture();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var settings = ConfigurationTests.ValidSettings() with
+        {
+            RadioCheck = new RadioCheckSettings { FallbackCapacity = 8 }
+        };
+        var sender = new CountingSender();
+        using var fallback = new FallbackSdsService(
+            NullLogger<FallbackSdsService>.Instance,
+            fixture.Router,
+            sender,
+            settings,
+            null,
+            FastFallbackTiming());
+        var completion = new TaskCompletionSource<FallbackSdsDelivery>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        fallback.DeliveryCompleted += Complete;
+        await fallback.StartAsync(timeout.Token);
+        var route = new RadioTargetRoute(1000001, fixture.Endpoint, 1, DateTime.UtcNow.Ticks);
+        var request = new FallbackSdsRequest(45, 100, 10101, 10001, route);
+
+        Assert.True(fallback.TryQueue(in request));
+        var delivery = await completion.Task.WaitAsync(timeout.Token);
+        await fallback.StopAsync(timeout.Token);
+
+        Assert.False(delivery.Delivered);
+        Assert.True(sender.SendCount > 0);
+        return;
+
+        void Complete(in FallbackSdsDelivery result) => completion.TrySetResult(result);
+    }
+
+    private static FallbackSdsTiming FastFallbackTiming() => new(
+        TimeSpan.FromMilliseconds(1),
+        TimeSpan.FromMilliseconds(10),
+        TimeSpan.FromMilliseconds(100),
+        TimeSpan.FromMilliseconds(1));
+
+    [Fact]
+    public void ControlWriters_ReproduceCapturedCallAlertAndRadioCheckBursts()
+    {
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+
+        DmrBurstWriter.WriteCallAlertRequest(burst, 10001, 10101, 1);
+        Assert.Equal(
+            "04628759063A22040008507084CD5D7F77FD757ACBDD1528222843643ED9159305",
+            Convert.ToHexString(burst));
+
+        DmrBurstWriter.WriteCallAlertAcknowledgement(burst, 10101, 10001, 1);
+        Assert.Equal(
+            "44BF01A887FC2F7134D254A404CD5D7F77FD757ACB3B946987C8068433C1388341",
+            Convert.ToHexString(burst));
+
+        DmrBurstWriter.WriteRadioCheckRequest(burst, 10001, 10101, 1);
+        Assert.Equal(
+            "04DD81B006C42D2C341059C004CD5D7F77FD757ACBAF144807E800043E49289364",
+            Convert.ToHexString(burst));
+
+        DmrBurstWriter.WriteRadioCheckAcknowledgement(burst, 10101, 10001, 1);
+        Assert.Equal(
+            "0493813A0650AE2C3620558004CD5D7F77FD757ACB2F1540859800463B09301373",
+            Convert.ToHexString(burst));
+
+        DmrBurstWriter.WriteCsbkPreamble(burst, 10001, 10101, 5, 1, false);
+        Span<byte> decoded = stackalloc byte[12];
+        Bptc19696.Decode(burst, decoded);
+        Assert.Equal("BD000005002775002711", Convert.ToHexString(decoded[..10]));
+        Assert.True(DmrCrc.CheckMaskedCcitt(decoded, 0xA5A5));
+    }
+
+    [Fact]
+    public void ControlParser_RecognizesCapturedMessagesAndRejectsInconsistentFrames()
+    {
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
+
+        DmrBurstWriter.WriteCallAlertRequest(burst, 10001, 10101, 1);
+        DmrBurstWriter.WriteDmrd(packet, burst, 1, 10001, 10101, 1000001, 0x03, 1);
+        Assert.True(DmrBurstWriter.TryReadControlMessage(packet, out var callAlert));
+        Assert.Equal(
+            new DmrControlMessage(DmrControlMessageType.CallAlertRequest, 10001, 10101),
+            callAlert);
+
+        DmrBurstWriter.WriteCallAlertAcknowledgement(burst, 10101, 10001, 1);
+        DmrBurstWriter.WriteDmrd(packet, burst, 2, 10101, 10001, 1000001, 0x03, 2);
+        Assert.True(DmrBurstWriter.TryReadControlMessage(packet, out var callAlertAck));
+        Assert.Equal(DmrControlMessageType.CallAlertAcknowledgement, callAlertAck.Type);
+
+        DmrBurstWriter.WriteRadioCheckRequest(burst, 10001, 10101, 1);
+        DmrBurstWriter.WriteDmrd(packet, burst, 3, 10001, 10101, 1000001, 0x03, 3);
+        Assert.True(DmrBurstWriter.TryReadControlMessage(packet, out var radioCheck));
+        Assert.Equal(DmrControlMessageType.RadioCheckRequest, radioCheck.Type);
+
+        DmrBurstWriter.WriteRadioCheckAcknowledgement(burst, 10101, 10001, 1);
+        DmrBurstWriter.WriteDmrd(packet, burst, 4, 10101, 10001, 1000001, 0x03, 4);
+        Assert.True(DmrBurstWriter.TryReadControlMessage(packet, out var radioCheckAck));
+        Assert.Equal(DmrControlMessageType.RadioCheckAcknowledgement, radioCheckAck.Type);
+
+        packet[5] ^= 1;
+        Assert.False(DmrBurstWriter.TryReadControlMessage(packet, out _));
+        packet[5] ^= 1;
+        packet[15] &= unchecked((byte)~0x40);
+        Assert.False(DmrBurstWriter.TryReadControlMessage(packet, out _));
+
+        Span<byte> invalid = stackalloc byte[12];
+        Bptc19696.Decode(burst, invalid);
+        invalid[3] ^= 1;
+        Bptc19696.Encode(invalid, burst);
+        DmrBurstWriter.WriteDmrd(packet, burst, 5, 10101, 10001, 1000001, 0x03, 5);
+        Assert.False(DmrBurstWriter.TryReadControlMessage(packet, out _));
+
+        DmrBurstWriter.WriteRadioCheckRequest(burst, 10001, 10101, 1);
+        Bptc19696.Decode(burst, invalid);
+        invalid[1] = 0x11;
+        DmrCrc.WriteMaskedCcitt(invalid[10..12], invalid[..10], 0xA5A5);
+        Bptc19696.Encode(invalid, burst);
+        DmrBurstWriter.WriteDmrd(packet, burst, 6, 10001, 10101, 1000001, 0x03, 6);
+        Assert.False(DmrBurstWriter.TryReadControlMessage(packet, out _));
+    }
+
+    [Fact]
+    public void WarmedControlParser_AllocatesNoManagedBytes()
+    {
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
+        DmrBurstWriter.WriteRadioCheckRequest(burst, 10001, 10101, 1);
+        DmrBurstWriter.WriteDmrd(packet, burst, 1, 10001, 10101, 1000001, 0x03, 1);
+        for (var i = 0; i < 100; i++)
+            Assert.True(DmrBurstWriter.TryReadControlMessage(packet, out _));
+
+        var parsed = 0;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+            if (DmrBurstWriter.TryReadControlMessage(packet, out _)) parsed++;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(1000, parsed);
+        Assert.Equal(0, allocated);
     }
 
     [Fact]
@@ -269,6 +547,72 @@ public sealed class SdsCodecTests
             DmrBurstWriter.WriteDmrd(response, burst, 1, 10001, DmrServiceIds.Echo,
                 1000001, 0x06, 42);
             router.RouteDmrd(response, endpoint, this);
+        }
+    }
+
+    private sealed class FallbackAcknowledgingSender(MicroSubnetRouter router, Ipv4Endpoint endpoint) : IDmrSender
+    {
+        private bool _acknowledged;
+        public int SendCount { get; private set; }
+
+        public void SendTo(ReadOnlySpan<byte> packet, Ipv4Endpoint endPoint)
+        {
+            SendCount++;
+            if (_acknowledged || (packet[15] & 0x0F) != 0x08) return;
+            _acknowledged = true;
+            Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+            Span<byte> response = stackalloc byte[DmrBurstWriter.DmrdLength];
+            DmrBurstWriter.WriteConfirmedResponseHeader(
+                burst, 10001, DmrServiceIds.ConnectionAttempt, 1, true, 1);
+            DmrBurstWriter.WriteDmrd(
+                response, burst, 1, 10001, DmrServiceIds.ConnectionAttempt, 1000001, 0x06, 42);
+            router.RouteDmrd(response, endpoint, this);
+        }
+    }
+
+    private sealed class DelayedFallbackResponseSender(
+        MicroSubnetRouter router,
+        Ipv4Endpoint endpoint,
+        TimeSpan delay,
+        bool acknowledged,
+        int responseSourceId,
+        int responseDestinationId) : IDmrSender
+    {
+        private readonly TaskCompletionSource _responseSent =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _dataBlockCount;
+        private int _responseScheduled;
+
+        public int HeaderCount { get; private set; }
+        public Task ResponseSent => _responseSent.Task;
+
+        public void SendTo(ReadOnlySpan<byte> packet, Ipv4Endpoint endPoint)
+        {
+            var dataType = packet[15] & 0x0F;
+            if (dataType == 0x06) HeaderCount++;
+            if (dataType != 0x08 || Interlocked.Increment(ref _dataBlockCount) != 21 ||
+                Interlocked.Exchange(ref _responseScheduled, 1) != 0) return;
+            _ = SendResponseAsync();
+        }
+
+        private async Task SendResponseAsync()
+        {
+            await Task.Delay(delay);
+            Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+            Span<byte> response = stackalloc byte[DmrBurstWriter.DmrdLength];
+            DmrBurstWriter.WriteConfirmedResponseHeader(
+                burst, responseSourceId, responseDestinationId, 1, acknowledged, 1);
+            DmrBurstWriter.WriteDmrd(
+                response,
+                burst,
+                1,
+                responseSourceId,
+                responseDestinationId,
+                1000001,
+                0x06,
+                42);
+            router.RouteDmrd(response, endpoint, this);
+            _responseSent.TrySetResult();
         }
     }
 

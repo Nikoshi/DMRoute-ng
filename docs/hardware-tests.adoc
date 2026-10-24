@@ -10,7 +10,11 @@
 
 include::hardware-test-plan.adoc[leveloffset=+1]
 
+include::device-compatibility-hardware-plan.adoc[leveloffset=+1]
+
 include::radio-check-capture-plan.adoc[leveloffset=+1]
+
+include::radio-check-resolver-hardware-plan.adoc[leveloffset=+1]
 
 include::hardware-test-results-2026-09-12.adoc[leveloffset=+1]
 
@@ -19,3 +23,7 @@ include::hardware-test-results-2026-09-13-location.adoc[leveloffset=+1]
 include::hardware-test-results-2026-09-13-radio-check.adoc[leveloffset=+1]
 
 include::hardware-test-results-2026-09-21-sds.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-09-21-control.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-09-21-radio-check-resolver.adoc[leveloffset=+1]

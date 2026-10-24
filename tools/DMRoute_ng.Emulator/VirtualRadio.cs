@@ -9,6 +9,14 @@ namespace DMRoute_ng.Emulator;
 
 public enum SdsTargetKind { Talkgroup, Radio }
 public enum SdsSendStatus { Sent, Acknowledged, Rejected, TimedOut }
+public enum RadioControlSendStatus { Acknowledged, TimedOut }
+public enum RadioControlEventType
+{
+    CallAlertRequest,
+    CallAlertAcknowledgement,
+    RadioCheckRequest,
+    RadioCheckAcknowledgement
+}
 
 public sealed record VirtualRadioOptions
 {
@@ -25,6 +33,9 @@ public readonly record struct SdsMessage(
     int SourceId, int DestinationId, bool IsGroupCall, bool IsConfirmed, string Text, DateTimeOffset ReceivedAt);
 
 public readonly record struct SdsSendResult(SdsSendStatus Status, int Attempts);
+public readonly record struct RadioControlSendResult(RadioControlSendStatus Status, int Attempts);
+public readonly record struct RadioControlEvent(
+    RadioControlEventType Type, int SourceId, int DestinationId, DateTimeOffset ReceivedAt);
 
 public sealed class VirtualRadio : IAsyncDisposable
 {
@@ -33,9 +44,12 @@ public sealed class VirtualRadio : IAsyncDisposable
     private const int PreambleCount = 5;
     private static readonly TimeSpan BurstDelay = TimeSpan.FromMilliseconds(60);
     private static readonly TimeSpan DeliveryReportDelay = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan ControlResponseDelay = TimeSpan.FromMilliseconds(120);
+
+    private enum AutomaticReplyKind { ConfirmedData, DeliveryReport, CallAlert, RadioCheck }
 
     private readonly record struct AutomaticReply(
-        int DestinationId, byte RequestSendSequence, bool IsDeliveryReport);
+        AutomaticReplyKind Kind, int DestinationId, byte RequestSendSequence = 0);
 
     private sealed class ReassemblySession
     {
@@ -56,6 +70,7 @@ public sealed class VirtualRadio : IAsyncDisposable
     private readonly HashSet<int> _talkgroups;
     private readonly Dictionary<uint, ReassemblySession> _sessions = new(MaximumSessions);
     private readonly Channel<SdsMessage> _inbox;
+    private readonly Channel<RadioControlEvent> _controlInbox;
     private readonly Channel<AutomaticReply> _automaticReplies;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _transactionGate = new(1, 1);
@@ -66,14 +81,18 @@ public sealed class VirtualRadio : IAsyncDisposable
     private readonly byte _colorCode;
     private readonly int _inboxCapacity;
     private TaskCompletionSource<bool>? _pendingResponse;
+    private TaskCompletionSource<bool>? _pendingControlResponse;
     private TaskCompletionSource<bool>? _pendingAnnouncement;
     private int _pendingResponseSource;
+    private int _pendingControlResponseSource;
+    private DmrControlMessageType _pendingControlResponseType;
     private uint _pendingAnnouncementStream;
     private int _streamSequence;
     private int _sendSequence;
     private int _identificationSequence;
     private int _packetSequence;
     private long _droppedMessages;
+    private long _droppedControlEvents;
     private int _announced;
     private int _disposed;
 
@@ -88,6 +107,7 @@ public sealed class VirtualRadio : IAsyncDisposable
         _colorCode = 1;
         _inboxCapacity = 1;
         _inbox = CreateInbox(1);
+        _controlInbox = CreateControlInbox(1);
         _automaticReplies = CreateReplyQueue();
     }
 
@@ -112,6 +132,7 @@ public sealed class VirtualRadio : IAsyncDisposable
         if (_talkgroups.Any(static id => id is <= 0 or > 0xFFFFFF))
             throw new ArgumentException("Talkgroup IDs must be between 1 and 16777215.", nameof(options));
         _inbox = CreateInbox(options.InboxCapacity);
+        _controlInbox = CreateControlInbox(options.InboxCapacity);
         _automaticReplies = CreateReplyQueue();
         _hotspot.DmrdReceived += HandleDmrd;
         _replyWorker = SendAutomaticRepliesAsync(_lifetime.Token);
@@ -121,7 +142,9 @@ public sealed class VirtualRadio : IAsyncDisposable
     public int Timeslot => _timeslot;
     public IReadOnlyCollection<int> Talkgroups => _talkgroups;
     public long DroppedMessages => Interlocked.Read(ref _droppedMessages);
+    public long DroppedControlEvents => Interlocked.Read(ref _droppedControlEvents);
     public int UnreadMessages => _inbox.Reader.Count;
+    public int UnreadControlEvents => _controlInbox.Reader.Count;
     public bool IsAnnounced => Volatile.Read(ref _announced) != 0;
 
     public async Task ReplayAsync(VirtualHotspot hotspot, RadioScenario scenario,
@@ -209,6 +232,100 @@ public sealed class VirtualRadio : IAsyncDisposable
         var count = 0;
         while (_inbox.Reader.TryRead(out _)) count++;
         return count;
+    }
+
+    public Task<RadioControlSendResult> SendCallAlertAsync(
+        int destinationId, CancellationToken cancellationToken = default) =>
+        SendControlAsync(DmrControlMessageType.CallAlertRequest, destinationId, cancellationToken);
+
+    public Task<RadioControlSendResult> CheckRadioAsync(
+        int destinationId, CancellationToken cancellationToken = default) =>
+        SendControlAsync(DmrControlMessageType.RadioCheckRequest, destinationId, cancellationToken);
+
+    public bool TryReceiveControlEvent(out RadioControlEvent controlEvent) =>
+        _controlInbox.Reader.TryRead(out controlEvent);
+
+    public ValueTask<RadioControlEvent> ReceiveControlEventAsync(CancellationToken cancellationToken = default) =>
+        _controlInbox.Reader.ReadAsync(cancellationToken);
+
+    public int ClearControlEvents()
+    {
+        var count = 0;
+        while (_controlInbox.Reader.TryRead(out _)) count++;
+        return count;
+    }
+
+    private async Task<RadioControlSendResult> SendControlAsync(
+        DmrControlMessageType requestType, int destinationId, CancellationToken cancellationToken)
+    {
+        var hotspot = RequireAttachedHotspot();
+        ThrowIfDisposed();
+        ValidateRadioId(destinationId);
+        var responseType = requestType == DmrControlMessageType.CallAlertRequest
+            ? DmrControlMessageType.CallAlertAcknowledgement
+            : DmrControlMessageType.RadioCheckAcknowledgement;
+
+        await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var packet = new byte[DmrBurstWriter.DmrdLength];
+            var burst = new byte[DmrBurstWriter.BurstLength];
+            for (var attempt = 1; attempt <= _maximumAttempts; attempt++)
+            {
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingControlResponseSource = destinationId;
+                _pendingControlResponseType = responseType;
+                _pendingControlResponse = completion;
+                await SendControlAttemptAsync(
+                    hotspot, packet, burst, requestType, destinationId, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await completion.Task.WaitAsync(
+                        _responseTimeout, hotspot.TimeProvider, cancellationToken).ConfigureAwait(false);
+                    return new RadioControlSendResult(RadioControlSendStatus.Acknowledged, attempt);
+                }
+                catch (TimeoutException) when (attempt < _maximumAttempts)
+                {
+                }
+                catch (TimeoutException)
+                {
+                    return new RadioControlSendResult(RadioControlSendStatus.TimedOut, attempt);
+                }
+            }
+            return new RadioControlSendResult(RadioControlSendStatus.TimedOut, _maximumAttempts);
+        }
+        finally
+        {
+            _pendingControlResponse = null;
+            _pendingControlResponseSource = 0;
+            _transactionGate.Release();
+        }
+    }
+
+    private async Task SendControlAttemptAsync(
+        VirtualHotspot hotspot,
+        byte[] packet,
+        byte[] burst,
+        DmrControlMessageType requestType,
+        int destinationId,
+        CancellationToken cancellationToken)
+    {
+        var preambleCount = requestType == DmrControlMessageType.CallAlertRequest ? 4 : 5;
+        for (var preamble = preambleCount; preamble > 0; preamble--)
+        {
+            DmrBurstWriter.WriteCsbkPreamble(
+                burst, RadioId, destinationId, (byte)preamble, _colorCode, false);
+            await SendBurstAsync(hotspot, packet, burst, destinationId, 0x03, NextStreamId(), false,
+                cancellationToken).ConfigureAwait(false);
+            await Task.Delay(BurstDelay, hotspot.TimeProvider, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (requestType == DmrControlMessageType.CallAlertRequest)
+            DmrBurstWriter.WriteCallAlertRequest(burst, RadioId, destinationId, _colorCode);
+        else
+            DmrBurstWriter.WriteRadioCheckRequest(burst, RadioId, destinationId, _colorCode);
+        await SendBurstAsync(hotspot, packet, burst, destinationId, 0x03, NextStreamId(), false,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SdsSendResult> SendUnconfirmedAsync(VirtualHotspot hotspot, int destinationId,
@@ -318,6 +435,12 @@ public sealed class VirtualRadio : IAsyncDisposable
                 response.TrySetResult(acknowledged);
                 return;
             }
+            if (DmrBurstWriter.TryReadControlMessage(packet, out var control) &&
+                control.DestinationId == RadioId)
+            {
+                HandleControlMessage(in control, datagram.ReceivedAt);
+                return;
+            }
             var addressed = info.IsGroupCall ? _talkgroups.Contains(info.DestinationId) : info.DestinationId == RadioId;
             if (!addressed || !info.IsDataFrame) return;
             if (info.DataType == 0x06) BeginSession(packet, in info, datagram.ReceivedAt);
@@ -327,6 +450,33 @@ public sealed class VirtualRadio : IAsyncDisposable
         {
             // Malformed RF input must not terminate the hotspot receive loop.
         }
+    }
+
+    private void HandleControlMessage(in DmrControlMessage control, DateTimeOffset receivedAt)
+    {
+        var eventType = control.Type switch
+        {
+            DmrControlMessageType.CallAlertRequest => RadioControlEventType.CallAlertRequest,
+            DmrControlMessageType.CallAlertAcknowledgement => RadioControlEventType.CallAlertAcknowledgement,
+            DmrControlMessageType.RadioCheckRequest => RadioControlEventType.RadioCheckRequest,
+            _ => RadioControlEventType.RadioCheckAcknowledgement
+        };
+        EnqueueControlEvent(new RadioControlEvent(
+            eventType, control.SourceId, control.DestinationId, receivedAt));
+
+        if (control.Type is DmrControlMessageType.CallAlertRequest or DmrControlMessageType.RadioCheckRequest)
+        {
+            var replyKind = control.Type == DmrControlMessageType.CallAlertRequest
+                ? AutomaticReplyKind.CallAlert
+                : AutomaticReplyKind.RadioCheck;
+            _automaticReplies.Writer.TryWrite(new AutomaticReply(replyKind, control.SourceId));
+            return;
+        }
+
+        if (_pendingControlResponse is { } response &&
+            control.SourceId == _pendingControlResponseSource &&
+            control.Type == _pendingControlResponseType)
+            response.TrySetResult(true);
     }
 
     private void BeginSession(ReadOnlySpan<byte> packet, in DmrdFrameInfo info, DateTimeOffset receivedAt)
@@ -405,8 +555,10 @@ public sealed class VirtualRadio : IAsyncDisposable
 
     private void QueueResponse(ReassemblySession session, bool acknowledged)
     {
-        _automaticReplies.Writer.TryWrite(
-            new AutomaticReply(session.SourceId, session.SendSequence, acknowledged));
+        _automaticReplies.Writer.TryWrite(new AutomaticReply(
+            acknowledged ? AutomaticReplyKind.DeliveryReport : AutomaticReplyKind.ConfirmedData,
+            session.SourceId,
+            session.SendSequence));
     }
 
     private async Task SendAutomaticRepliesAsync(CancellationToken cancellationToken)
@@ -421,19 +573,33 @@ public sealed class VirtualRadio : IAsyncDisposable
                 await _transactionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    if (reply.IsDeliveryReport)
+                    if (reply.Kind == AutomaticReplyKind.DeliveryReport)
                     {
                         await Task.Delay(DeliveryReportDelay, _hotspot.TimeProvider, cancellationToken)
                             .ConfigureAwait(false);
                         await SendDeliveryReportAsync(_hotspot, reply.DestinationId, cancellationToken)
                             .ConfigureAwait(false);
                     }
-                    else
+                    else if (reply.Kind == AutomaticReplyKind.ConfirmedData)
                     {
                         DmrBurstWriter.WriteConfirmedResponseHeader(
                             responseBurst, RadioId, reply.DestinationId, reply.RequestSendSequence, false, _colorCode);
                         DmrBurstWriter.WriteDmrd(responsePacket, responseBurst, NextPacketSequence(), RadioId,
                             reply.DestinationId, _hotspot.RepeaterId, 0x06, NextStreamId(), _timeslot, false);
+                        await _hotspot.SendDmrdAsync(responsePacket, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await Task.Delay(ControlResponseDelay, _hotspot.TimeProvider, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (reply.Kind == AutomaticReplyKind.CallAlert)
+                            DmrBurstWriter.WriteCallAlertAcknowledgement(
+                                responseBurst, RadioId, reply.DestinationId, _colorCode);
+                        else
+                            DmrBurstWriter.WriteRadioCheckAcknowledgement(
+                                responseBurst, RadioId, reply.DestinationId, _colorCode);
+                        DmrBurstWriter.WriteDmrd(responsePacket, responseBurst, NextPacketSequence(), RadioId,
+                            reply.DestinationId, _hotspot.RepeaterId, 0x03, NextStreamId(), _timeslot, false);
                         await _hotspot.SendDmrdAsync(responsePacket, cancellationToken).ConfigureAwait(false);
                     }
                 }
@@ -481,6 +647,12 @@ public sealed class VirtualRadio : IAsyncDisposable
     {
         if (_inbox.Reader.Count >= _inboxCapacity) Interlocked.Increment(ref _droppedMessages);
         _inbox.Writer.TryWrite(message);
+    }
+
+    private void EnqueueControlEvent(RadioControlEvent controlEvent)
+    {
+        if (_controlInbox.Reader.Count >= _inboxCapacity) Interlocked.Increment(ref _droppedControlEvents);
+        _controlInbox.Writer.TryWrite(controlEvent);
     }
 
     private static bool TryDecodeText(ReadOnlySpan<byte> data, out string text)
@@ -554,13 +726,17 @@ public sealed class VirtualRadio : IAsyncDisposable
         Channel.CreateBounded<SdsMessage>(new BoundedChannelOptions(capacity)
         { SingleReader = false, SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
 
+    private static Channel<RadioControlEvent> CreateControlInbox(int capacity) =>
+        Channel.CreateBounded<RadioControlEvent>(new BoundedChannelOptions(capacity)
+        { SingleReader = false, SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
+
     private static Channel<AutomaticReply> CreateReplyQueue() =>
         Channel.CreateBounded<AutomaticReply>(new BoundedChannelOptions(16)
         { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.DropWrite });
 
     private VirtualHotspot RequireAttachedHotspot() =>
         _hotspot ?? throw new InvalidOperationException("This replay-only radio is not attached to a hotspot.");
-    private static int ValidateRadioId(int radioId) => radioId is >= 10000 and <= 99999
+    private static int ValidateRadioId(int radioId) => radioId is >= 10000 and <= 999991
         ? radioId : throw new ArgumentOutOfRangeException(nameof(radioId), "Radio IDs must contain five digits.");
     private byte NextPacketSequence() => unchecked((byte)Interlocked.Increment(ref _packetSequence));
     private uint NextStreamId() => unchecked((uint)Interlocked.Increment(ref _streamSequence));
@@ -579,6 +755,7 @@ public sealed class VirtualRadio : IAsyncDisposable
             catch (OperationCanceledException) { }
         }
         _inbox.Writer.TryComplete();
+        _controlInbox.Writer.TryComplete();
         _lifetime.Dispose();
         _transactionGate.Dispose();
     }

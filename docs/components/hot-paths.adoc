@@ -67,6 +67,14 @@ Duplikatfenster
 |`Sds:MaxMessageBytes`
 |4096
 |Maximale Bytes pro SDS-Nachricht
+
+|`RadioCheck:MaxPending`
+|128
+|Gleichzeitige asynchrone Pfadauflösungen
+
+|`RadioCheck:FallbackCapacity`
+|128
+|Dauerhafte, außerhalb des Paketpfads gespeicherte Fallback-SDS
 |===
 
 Ist eine Tabelle voll, wird das DMR-Paket weiterhin geroutet. Nur der neue Tracking-Zustand wird nicht angelegt; ein atomarer Diagnosezähler wird erhöht.

@@ -2,6 +2,19 @@ using System.Buffers.Binary;
 
 namespace DMRoute_ng.Coding;
 
+public enum DmrControlMessageType
+{
+    CallAlertRequest,
+    CallAlertAcknowledgement,
+    RadioCheckRequest,
+    RadioCheckAcknowledgement
+}
+
+public readonly record struct DmrControlMessage(
+    DmrControlMessageType Type,
+    int SourceId,
+    int DestinationId);
+
 public static class DmrBurstWriter
 {
     public const int BurstLength = 33;
@@ -11,18 +24,80 @@ public static class DmrBurstWriter
     private const ulong MobileStationDataSync = 0xD5D7F77FD757UL;
 
     public static void WriteCsbkPreamble(
-        Span<byte> destination, int sourceId, int destinationId, byte blocksToFollow, byte colorCode = 1)
+        Span<byte> destination, int sourceId, int destinationId, byte blocksToFollow, byte colorCode = 1,
+        bool isDataContent = true)
     {
         Span<byte> decoded = stackalloc byte[12];
         decoded[0] = 0xBD;
         decoded[1] = 0x00;
-        decoded[2] = 0x80;
+        decoded[2] = isDataContent ? (byte)0x80 : (byte)0x00;
         decoded[3] = blocksToFollow;
         WriteId(decoded[4..7], destinationId);
         WriteId(decoded[7..10], sourceId);
         DmrCrc.WriteMaskedCcitt(decoded[10..12], decoded[..10], CsbkMask);
         Bptc19696.Encode(decoded, destination);
         WriteSlotTypeAndSync(destination, colorCode, 0x03);
+    }
+
+    public static void WriteCallAlertRequest(
+        Span<byte> destination, int sourceId, int destinationId, byte colorCode = 1) =>
+        WriteControl(destination, 0x9F, 0x00, 0x00, destinationId, sourceId, colorCode);
+
+    public static void WriteCallAlertAcknowledgement(
+        Span<byte> destination, int sourceId, int destinationId, byte colorCode = 1) =>
+        WriteControl(destination, 0xA0, 0x9F, 0x00, destinationId, sourceId, colorCode);
+
+    public static void WriteRadioCheckRequest(
+        Span<byte> destination, int sourceId, int destinationId, byte colorCode = 1) =>
+        WriteControl(destination, 0xA4, 0x00, 0x00, sourceId, destinationId, colorCode);
+
+    public static void WriteRadioCheckAcknowledgement(
+        Span<byte> destination, int sourceId, int destinationId, byte colorCode = 1) =>
+        WriteControl(destination, 0xA4, 0x00, 0x80, destinationId, sourceId, colorCode);
+
+    public static bool TryReadControlMessage(ReadOnlySpan<byte> dmrd, out DmrControlMessage message)
+    {
+        message = default;
+        if (dmrd.Length < DmrdLength || !dmrd[..4].SequenceEqual("DMRD"u8) ||
+            (dmrd[15] & 0x6F) != 0x63)
+            return false;
+
+        var outerSourceId = ReadId(dmrd[5..8]);
+        var outerDestinationId = ReadId(dmrd[8..11]);
+        Span<byte> decoded = stackalloc byte[12];
+        Bptc19696.Decode(dmrd[20..53], decoded);
+        if ((decoded[0] & 0xC0) != 0x80 || decoded[1] != 0x10 ||
+            !DmrCrc.CheckMaskedCcitt(decoded, CsbkMask))
+            return false;
+
+        var firstId = ReadId(decoded[4..7]);
+        var secondId = ReadId(decoded[7..10]);
+        var opcode = decoded[0] & 0x3F;
+        DmrControlMessageType type;
+        switch (opcode)
+        {
+            case 0x1F when decoded[2] == 0x00 && decoded[3] == 0x00 &&
+                                firstId == outerDestinationId && secondId == outerSourceId:
+                type = DmrControlMessageType.CallAlertRequest;
+                break;
+            case 0x20 when decoded[2] == 0x9F && decoded[3] == 0x00 &&
+                                firstId == outerDestinationId && secondId == outerSourceId:
+                type = DmrControlMessageType.CallAlertAcknowledgement;
+                break;
+            case 0x24 when decoded[2] == 0x00 && decoded[3] == 0x00 &&
+                                firstId == outerSourceId && secondId == outerDestinationId:
+                type = DmrControlMessageType.RadioCheckRequest;
+                break;
+            case 0x24 when decoded[2] == 0x00 && decoded[3] == 0x80 &&
+                                firstId == outerDestinationId && secondId == outerSourceId:
+                type = DmrControlMessageType.RadioCheckAcknowledgement;
+                break;
+            default:
+                return false;
+        }
+
+        message = new DmrControlMessage(type, outerSourceId, outerDestinationId);
+        return true;
     }
 
     public static void WriteConfirmedDataHeader(
@@ -176,6 +251,27 @@ public static class DmrBurstWriter
     }
 
     private static int ReadId(ReadOnlySpan<byte> data) => (data[0] << 16) | (data[1] << 8) | data[2];
+
+    private static void WriteControl(
+        Span<byte> destination,
+        byte opcode,
+        byte value2,
+        byte value3,
+        int firstId,
+        int secondId,
+        byte colorCode)
+    {
+        Span<byte> decoded = stackalloc byte[12];
+        decoded[0] = opcode;
+        decoded[1] = 0x10;
+        decoded[2] = value2;
+        decoded[3] = value3;
+        WriteId(decoded[4..7], firstId);
+        WriteId(decoded[7..10], secondId);
+        DmrCrc.WriteMaskedCcitt(decoded[10..12], decoded[..10], CsbkMask);
+        Bptc19696.Encode(decoded, destination);
+        WriteSlotTypeAndSync(destination, colorCode, 0x03);
+    }
 
     private static void WriteId(Span<byte> destination, int id)
     {

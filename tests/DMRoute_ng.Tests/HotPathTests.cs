@@ -219,6 +219,33 @@ public sealed class HotPathTests
     }
 
     [Fact]
+    public void WarmedConfirmedResponseParsing_AllocatesNoManagedBytes()
+    {
+        Span<byte> burst = stackalloc byte[DmrBurstWriter.BurstLength];
+        Span<byte> packet = stackalloc byte[DmrBurstWriter.DmrdLength];
+        DmrBurstWriter.WriteConfirmedResponseHeader(
+            burst, 10101, DmrServiceIds.ConnectionAttempt, 1, true, 1);
+        DmrBurstWriter.WriteDmrd(
+            packet, burst, 1, 10101, DmrServiceIds.ConnectionAttempt, 1010001, 0x06, 42);
+
+        for (var i = 0; i < 100; i++)
+            DmrBurstWriter.TryReadConfirmedResponse(
+                packet, 10101, DmrServiceIds.ConnectionAttempt, out _);
+        var matched = 0;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 1000; i++)
+        {
+            if (DmrBurstWriter.TryReadConfirmedResponse(
+                    packet, 10101, DmrServiceIds.ConnectionAttempt, out var acknowledged) && acknowledged)
+                matched++;
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(1000, matched);
+    }
+
+    [Fact]
     public void WarmedSdsDeliveryReportIngestion_AllocatesNoManagedBytes()
     {
         using var fixture = new RouterFixture();

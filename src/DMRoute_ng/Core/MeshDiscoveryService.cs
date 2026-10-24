@@ -14,6 +14,9 @@ namespace DMRoute_ng.Core;
 public sealed class MeshDiscoveryService : BackgroundService
 {
     private readonly record struct LocationUpdate(int DeviceId, Ipv4Endpoint Target);
+    private readonly record struct ControlPacket(MeshControlMessage Message, Ipv4Endpoint Target);
+
+    public delegate void MeshControlMessageHandler(in MeshControlMessage message, Ipv4Endpoint remote);
 
     private readonly ILogger<MeshDiscoveryService> _logger;
     private readonly MasterRegistry _masterRegistry;
@@ -31,9 +34,20 @@ public sealed class MeshDiscoveryService : BackgroundService
             SingleWriter = true,
             FullMode = BoundedChannelFullMode.Wait
         });
+    private readonly Channel<ControlPacket> _controlPackets = Channel.CreateBounded<ControlPacket>(
+        new BoundedChannelOptions(512)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait,
+            AllowSynchronousContinuations = false
+        });
     private long _droppedLocationUpdates;
+    private long _droppedControlPackets;
 
     public long DroppedLocationUpdates => Interlocked.Read(ref _droppedLocationUpdates);
+    public long DroppedControlPackets => Interlocked.Read(ref _droppedControlPackets);
+    public event MeshControlMessageHandler? ControlMessageReceived;
 
     public MeshDiscoveryService(ILogger<MeshDiscoveryService> logger, MasterRegistry masterRegistry, RoamingRegistry roamingRegistry,
         int myZoneId, ushort myDataPort, int discoveryPort, string meshPsk)
@@ -58,6 +72,7 @@ public sealed class MeshDiscoveryService : BackgroundService
 
         var broadcastTask = BroadcastLoopAsync(stoppingToken);
         var locationUpdateTask = LocationUpdateLoopAsync(stoppingToken);
+        var controlPacketTask = ControlPacketLoopAsync(stoppingToken);
 
         var buffer = new byte[1024];
         EndPoint remoteEp = new IPEndPoint(IPAddress.Any, 0);
@@ -84,7 +99,7 @@ public sealed class MeshDiscoveryService : BackgroundService
         {
             try
             {
-                await Task.WhenAll(broadcastTask, locationUpdateTask);
+                await Task.WhenAll(broadcastTask, locationUpdateTask, controlPacketTask);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -125,6 +140,34 @@ public sealed class MeshDiscoveryService : BackgroundService
         return Task.CompletedTask;
     }
 
+    public bool QueueControlMessage(in MeshControlMessage message, Ipv4Endpoint target)
+    {
+        target = new Ipv4Endpoint(target.Address, checked((ushort)_discoveryPort));
+        if (_controlPackets.Writer.TryWrite(new ControlPacket(message, target))) return true;
+        Interlocked.Increment(ref _droppedControlPackets);
+        return false;
+    }
+
+    private async Task ControlPacketLoopAsync(CancellationToken token)
+    {
+        var packet = new byte[MeshControlProtocol.PacketLength];
+        var targetAddress = new SocketAddress(AddressFamily.InterNetwork, 16);
+        await foreach (var control in _controlPackets.Reader.ReadAllAsync(token))
+        {
+            var message = control.Message;
+            MeshControlProtocol.Write(packet, in message, _meshPskBytes, DateTime.UtcNow.Ticks);
+            control.Target.WriteTo(targetAddress);
+            try
+            {
+                await _socket.SendToAsync(packet, SocketFlags.None, targetAddress, token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Fehler beim Senden eines Mesh-Steuerpakets");
+            }
+        }
+    }
+
     private async Task LocationUpdateLoopAsync(CancellationToken token)
     {
         var packet = new byte[52];
@@ -163,6 +206,20 @@ public sealed class MeshDiscoveryService : BackgroundService
         {
             ProcessLocationUpdate(payload, remote);
         }
+        else if (payload[..4].SequenceEqual("DMCX"u8))
+        {
+            ProcessControlPacket(payload, remote);
+        }
+    }
+
+    private void ProcessControlPacket(ReadOnlySpan<byte> payload, IPEndPoint remote)
+    {
+        if (!MeshControlProtocol.TryRead(payload, _meshPskBytes, DateTime.UtcNow.Ticks, out var message)) return;
+        if (message.OriginZone == _myZoneId) return;
+        if (!_masterRegistry.TryGet(message.OriginZone, out var peer) ||
+            peer.DataEndPoint.Address != Ipv4Endpoint.FromIPEndPoint(remote).Address) return;
+
+        ControlMessageReceived?.Invoke(in message, Ipv4Endpoint.FromIPEndPoint(remote));
     }
 
     private void ProcessBeacon(ReadOnlySpan<byte> payload, IPEndPoint remote)

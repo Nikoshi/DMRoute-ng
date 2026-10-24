@@ -228,6 +228,11 @@ internal sealed class PlaygroundRepl : IAsyncDisposable
         await output.WriteLineAsync("  cls clear <name>").ConfigureAwait(false);
         await output.WriteLineAsync("      radio list").ConfigureAwait(false);
         await output.WriteLineAsync("      radio announce <name|all>").ConfigureAwait(false);
+        await output.WriteLineAsync("      radio alert <quelle> <ziel-id>").ConfigureAwait(false);
+        await output.WriteLineAsync("      radio check <quelle> <ziel-id>").ConfigureAwait(false);
+        await output.WriteLineAsync("      radio events <radio>").ConfigureAwait(false);
+        await output.WriteLineAsync("      radio watch <radio>   (Ctrl+C beendet die Beobachtung)").ConfigureAwait(false);
+        await output.WriteLineAsync("      radio clear <radio>").ConfigureAwait(false);
         await output.WriteLineAsync("      sds send <radio> <tg|fug|service> <ziel-id> \"<text>\"").ConfigureAwait(false);
         await output.WriteLineAsync("      sds inbox <radio>").ConfigureAwait(false);
         await output.WriteLineAsync("      sds watch <radio>   (Ctrl+C beendet die Beobachtung)").ConfigureAwait(false);
@@ -274,7 +279,60 @@ internal sealed class PlaygroundRepl : IAsyncDisposable
             }
             return;
         }
-        throw new ArgumentException("Verwendung: radio <list|announce <name|all>>");
+        if (tokens.Length == 4 &&
+            (tokens[1].Equals("alert", StringComparison.OrdinalIgnoreCase) ||
+             tokens[1].Equals("check", StringComparison.OrdinalIgnoreCase)))
+        {
+            var session = ResolveRadio(tokens[2]);
+            if (!int.TryParse(tokens[3], NumberStyles.None, CultureInfo.InvariantCulture, out var destinationId))
+                throw new ArgumentException("ziel-id muss eine gültige Funkgerät-ID sein.");
+            var isAlert = tokens[1].Equals("alert", StringComparison.OrdinalIgnoreCase);
+            var result = isAlert
+                ? await session.Radio.SendCallAlertAsync(destinationId, cancellationToken).ConfigureAwait(false)
+                : await session.Radio.CheckRadioAsync(destinationId, cancellationToken).ConfigureAwait(false);
+            var operation = isAlert ? "Call Alert" : "Radio Check";
+            var resultText = result.Status == RadioControlSendStatus.Acknowledged
+                ? $"nach {result.Attempts} Versuch(en) bestätigt"
+                : $"nach {result.Attempts} Versuch(en) ohne Bestätigung";
+            await output.WriteLineAsync($"{session.Settings.Name}: {operation} {resultText}.").ConfigureAwait(false);
+            return;
+        }
+        if (tokens.Length == 3 && tokens[1].Equals("events", StringComparison.OrdinalIgnoreCase))
+        {
+            var session = ResolveRadio(tokens[2]);
+            var count = 0;
+            while (session.Radio.TryReceiveControlEvent(out var controlEvent))
+            {
+                await WriteControlEventAsync(session.Settings.Name, controlEvent, output).ConfigureAwait(false);
+                count++;
+            }
+            if (count == 0) await output.WriteLineAsync($"{session.Settings.Name}: keine Control-Ereignisse.")
+                .ConfigureAwait(false);
+            return;
+        }
+        if (tokens.Length == 3 && tokens[1].Equals("watch", StringComparison.OrdinalIgnoreCase))
+        {
+            var session = ResolveRadio(tokens[2]);
+            await output.WriteLineAsync(
+                $"{session.Settings.Name}: Control-Beobachtung aktiv; Ctrl+C beendet sie.").ConfigureAwait(false);
+            while (session.Radio.TryReceiveControlEvent(out var pending))
+                await WriteControlEventAsync(session.Settings.Name, pending, output).ConfigureAwait(false);
+            while (true)
+            {
+                var controlEvent = await session.Radio.ReceiveControlEventAsync(cancellationToken).ConfigureAwait(false);
+                await WriteControlEventAsync(session.Settings.Name, controlEvent, output).ConfigureAwait(false);
+            }
+        }
+        if (tokens.Length == 3 && tokens[1].Equals("clear", StringComparison.OrdinalIgnoreCase))
+        {
+            var session = ResolveRadio(tokens[2]);
+            await output.WriteLineAsync(
+                $"{session.Settings.Name}: {session.Radio.ClearControlEvents()} Control-Ereignisse entfernt.")
+                .ConfigureAwait(false);
+            return;
+        }
+        throw new ArgumentException(
+            "Verwendung: radio <list|announce <name|all>|alert <quelle> <ziel-id>|check <quelle> <ziel-id>|events <radio>|watch <radio>|clear <radio>>");
     }
 
     private async Task SdsCommandAsync(string[] tokens, TextWriter output, CancellationToken cancellationToken)
@@ -349,13 +407,28 @@ internal sealed class PlaygroundRepl : IAsyncDisposable
             $"{session.Settings.Name}: FuG {session.Radio.RadioId}, Hotspot {session.Settings.Hotspot}, " +
             $"TS {session.Radio.Timeslot}, TGs [{string.Join(',', session.Radio.Talkgroups)}], " +
             $"Route {(session.Radio.IsAnnounced ? "bereit" : "nicht angekündigt")}, " +
-            $"Inbox {session.Radio.UnreadMessages}, verworfen {session.Radio.DroppedMessages}");
+            $"SDS-Inbox {session.Radio.UnreadMessages}, verworfen {session.Radio.DroppedMessages}, " +
+            $"Control {session.Radio.UnreadControlEvents}, verworfen {session.Radio.DroppedControlEvents}");
 
     private static Task WriteSdsAsync(string name, SdsMessage message, TextWriter output) =>
         output.WriteLineAsync(
             $"{message.ReceivedAt:O} <- {name}: SDS {message.SourceId} -> " +
             $"{(message.IsGroupCall ? "TG" : "FuG")} {message.DestinationId} " +
             $"({(message.IsConfirmed ? "bestätigt" : "unbestätigt")}): {message.Text}");
+
+    private static Task WriteControlEventAsync(
+        string name, RadioControlEvent controlEvent, TextWriter output)
+    {
+        var type = controlEvent.Type switch
+        {
+            RadioControlEventType.CallAlertRequest => "Call Alert Anfrage",
+            RadioControlEventType.CallAlertAcknowledgement => "Call Alert Bestätigung",
+            RadioControlEventType.RadioCheckRequest => "Radio Check Anfrage",
+            _ => "Radio Check Bestätigung"
+        };
+        return output.WriteLineAsync(
+            $"{controlEvent.ReceivedAt:O} <- {name}: {type} {controlEvent.SourceId} -> {controlEvent.DestinationId}");
+    }
 
     private async Task ForTargetsAsync(
         string selector,

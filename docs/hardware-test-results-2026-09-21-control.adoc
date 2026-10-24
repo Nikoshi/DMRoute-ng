@@ -1,0 +1,99 @@
+= Hardwareergebnis Call Alert und Radio Check vom 21. September 2026
+:toc:
+:sectnums:
+
+== Ergebnis
+
+Call Alert und Radio Check wurden zwischen dem AnyTone mit DMR-ID `10001` und
+dem realen Zielgerät `10101` vollständig auf der UDP-Seite erfasst. Ein
+antwortorientierter Ein-Hotspot-Aufbau reichte dafür aus: Nach jedem
+Master-Neustart sendete nur `10001`; dadurch blieb `10101` unbekannt und der
+Master leitete die Anfrage nicht auf denselben Simplex-Hotspot zurück.
+
+Die Mitschnitte liefern Anfrage, positive Antwort, Adressierung, Anzahl der
+Preambles und Antwortzeit als Golden Vectors für den Emulator.
+
+== Testaufbau
+
+[cols="2,3",options="header"]
+|===
+|Komponente |Wert
+
+|Master
+|Zone `101`, UDP `62031`
+
+|Hotspot
+|Homebrew/MMDVM, ID `1010001`, ein Simplex-RF-Endpunkt
+
+|Anfragendes Gerät
+|AnyTone, DMR-ID `10001`
+
+|Antwortendes Gerät
+|DMR-ID `10101`
+|===
+
+Vor jedem isolierten Lauf wurde der Master neu gestartet. Das Zielgerät sendete
+vor der Anfrage keinen eigenen Verkehr. MQTT zeigte absichtlich auf einen
+nicht erreichbaren lokalen Broker und war für die Messung ohne Bedeutung.
+
+== Call Alert
+
+Die Anfrage bestand aus vier Control-Preambles mit den Zählern `4` bis `1`
+und einem Request-CSBK. Die positive Antwort folgte nach ungefähr 114 ms.
+
+[cols="1,2",options="header"]
+|===
+|Richtung |Dekodierter CSBK einschließlich CRC
+
+|`10001 -> 10101`
+|`9F1000000027750027112386`
+
+|`10101 -> 10001`
+|`A0109F000027110027757E5A`
+|===
+
+Der Request verwendet Opcode `0x1f`, die Bestätigung Opcode `0x20` und
+Feature-ID `0x10`. In beiden Paketen stehen innere Ziel-ID und Quell-ID in
+derselben Reihenfolge wie im äußeren DMRD-Header.
+
+== Radio Check
+
+Der isolierte Radio Check bestand aus fünf Control-Preambles mit den Zählern
+`5` bis `1`, dem Request und einer positiven Antwort nach ungefähr 124 ms.
+
+[cols="1,2",options="header"]
+|===
+|Richtung |Dekodierter CSBK einschließlich CRC
+
+|`10001 -> 10101`
+|`A4100000002711002775CA98`
+
+|`10101 -> 10001`
+|`A41000800027110027756161`
+|===
+
+Beide Pakete verwenden Opcode `0x24` und Feature-ID `0x10`. Byte 3 ist im
+Request `0x00` und in der positiven Antwort `0x80`. Die inneren IDs behalten
+in der Antwort die Reihenfolge ursprünglicher Anfrager, ursprüngliches Ziel;
+der äußere DMRD-Header dreht Quelle und Ziel dagegen erwartungsgemäß um.
+
+== Erkenntnis zum Simplex-Aufbau
+
+In einem ersten kombinierten Lauf antwortete `10101` erfolgreich auf Call
+Alert und wurde dadurch vom Master gelernt. Beim folgenden Radio Check leitete
+der Master die Anfrage auf denselben Hotspot zurück; nur zwei Preambles wurden
+noch sauber erfasst und die Funkantwort fehlte. Nach dem Master-Neustart war
+der isolierte Radio Check vollständig sichtbar.
+
+Der Befund bestätigt die frühere Kollisionsvermutung, ersetzt aber nicht die
+geplanten bidirektionalen Messreihen über zwei unabhängige RF-Endpunkte.
+
+== Lokale Belege
+
+Die Rohdaten enthalten lokale Netzwerkdetails und werden nicht eingecheckt:
+
+* `/private/tmp/dmroute-control-ack-en0.pcap`,
+* `/private/tmp/dmroute-radio-check-ack-en0.pcap`.
+
+Die sanitisierten CSBK-Werte werden durch die Codec-Golden-Tests dauerhaft
+reproduziert.

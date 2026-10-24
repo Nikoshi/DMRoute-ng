@@ -44,14 +44,18 @@ internal sealed class PlaygroundCommandCompleter
         {
             if (command is "login" or "ping" or "disconnect") return _hotspots.Append("all");
             if (command is "send" or "run" or "receive" or "watch" or "clear") return _hotspots;
-            if (command == "radio") return ["list", "announce"];
+            if (command == "radio") return ["list", "announce", "alert", "check", "events", "watch", "clear"];
             if (command == "sds") return ["send", "inbox", "watch", "clear"];
             return [];
         }
 
         if (command == "run" && tokens.Count == 2) return CompletePath(prefix, quoted);
-        if (command == "radio" && tokens.Count == 2 &&
-            tokens[1].Equals("announce", StringComparison.OrdinalIgnoreCase)) return _radios.Append("all");
+        if (command == "radio" && tokens.Count == 2)
+        {
+            var radioSubcommand = tokens[1].ToLowerInvariant();
+            if (radioSubcommand == "announce") return _radios.Append("all");
+            if (radioSubcommand is "alert" or "check" or "events" or "watch" or "clear") return _radios;
+        }
         if (command != "sds") return [];
 
         var subcommand = tokens[1].ToLowerInvariant();

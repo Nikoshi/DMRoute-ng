@@ -1,0 +1,86 @@
+= Radio-Check-Routing und Fallback-SDS
+:toc:
+:sectnums:
+
+== Zweck
+
+Ein privater Radio Check funktioniert im normalen Routing sofort, wenn der
+Zielpfad bereits bekannt ist. Fehlt dieser Pfad, startet DMRoute-ng außerhalb
+des DMR-Empfangsthreads eine begrenzte Erreichbarkeitssuche. Call Alert,
+gewöhnliche private SDS und Sprache lösen diese Suche derzeit nicht aus.
+
+== Suchreihenfolge
+
+Für Ziel-ID `10001` ist `10001 / 100 = 100` die Heimat-Zone. Die Suche verwendet
+folgende Reihenfolge:
+
+. einen frischen lokalen Gastpfad auf dem aktuellen Master,
+. den zuständigen Heimat-Master,
+. einen aktiven Heimzonen-Probe über dessen angemeldete Hotspots,
+. dessen frischeren lokalen oder Roaming-Eintrag,
+. die Bestätigung durch den angegebenen Roaming-Master,
+. einen logischen WHOIS-Broadcast an alle bekannten direkten Mesh-Peers.
+
+Lokale Teilnehmer- und Gastpfade gelten höchstens 15 Minuten und nur bei einem
+weiterhin angemeldeten Hotspot. Der Heimat-Master vergleicht `LastSeen` des
+lokalen Pfads mit dem Roaming-Eintrag. Bei mehreren WHOIS-Treffern gewinnt die
+neueste Beobachtung, bei Gleichstand die niedrigste Zonen-ID.
+
+Eine Heimat- oder Roaming-Abfrage wartet höchstens 350 ms. WHOIS wird nach
+200 ms einmal wiederholt und nach insgesamt 700 ms abgeschlossen. Retries
+desselben Funkgeräts teilen sich den laufenden Zustand. Positive Ergebnisse
+werden 60 Sekunden, negative Ergebnisse 10 Sekunden behalten.
+
+== Ausführung
+
+Kennt der Heimat-Master das Ziel noch nicht, erzeugt er die vollständige,
+capture-verifizierte Radio-Check-Sequenz mit fünf Preambles auf allen
+angemeldeten lokalen Hotspots außer dem Eingangs-Hotspot. Er wartet 500 ms auf
+die Antwort des echten Ziel-FuG. Nur diese Antwort bestätigt den Pfad; ein
+ausgesendeter Probe allein gilt nicht als Treffer. Nach einem Timeout folgen
+Roaming-Auflösung und WHOIS.
+
+Für einen bereits bestätigten Zielpfad erzeugt der ausführende Master dieselbe
+vollständige Sequenz neu. Quell- und Ziel-ID bleiben unverändert; Hotspot-ID,
+Endpunkt und Color Code stammen aus dem Zielpfad. Ohne Antwort sieht das
+Quell-FuG weiterhin den normalen Timeout.
+
+== Mesh-WHOIS
+
+WHOIS und die Ausführungsanweisung verwenden feste `DMCX`-Pakete auf UDP 42069.
+Sie enthalten Version, Typ, Korrelations-ID, Zonen- und Teilnehmerdaten,
+UTC-Ticks sowie HMAC-SHA256 über den Header. Pakete außerhalb des 30-Sekunden-
+Zeitfensters, von unbekannten Peers oder mit ungültiger Signatur werden
+verworfen. Der Broadcast ist ein Unicast-Fanout an die aktuelle
+`MasterRegistry`; es gibt keine Multi-Hop-Flutung.
+
+== Fallback-SDS
+
+Bleibt WHOIS ohne Treffer, legt der Heimat-Master für höchstens 24 Stunden eine
+bestätigte private SDS vom Dienst `990098` an:
+
+[source,text]
+----
+Verbindungsversuch von 10101
+----
+
+Ist der Heimat-Master offline, hält der Ursprungs-Master den Eintrag und
+übergibt ihn nach dem nächsten Beacon. Er entfernt seine Kopie erst nach der
+persistierten Annahme durch den Heimat-Master. Die JSON-Outbox wird über eine
+temporäre Datei atomar ersetzt und überlebt einen Neustart. Gleiche Quell-/
+Zielpaare werden innerhalb von zehn Minuten zusammengefasst.
+
+Sobald ein lokaler oder bestätigter Roaming-Pfad erscheint, sendet der
+zuständige Master die SDS mit höchstens drei Versuchen und 2,5 Sekunden
+Antwortzeit. Ein positiver TMS-Zustellbericht oder ein positiver bestätigter
+DMR-Response-Header entfernt den Eintrag. Eine negative Quittung gilt nicht als
+Erfolg. Nach einem fehlgeschlagenen Zyklus wird frühestens fünf Minuten später
+erneut versucht.
+
+== Grenzen
+
+Auflösungen, Mesh-Queues und Outbox sind fest begrenzt. Die Outbox enthält
+standardmäßig 128 Einträge; ist sie voll, wird keine weitere Fallback-SDS
+angelegt. WHOIS kennt nur Master, die durch ein gültiges DMBC-Beacon in der
+lokalen Registry stehen. Die Funktion ersetzt daher weder ein dauerhaftes
+Verzeichnis noch eine geroutete Mesh-Topologie.

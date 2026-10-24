@@ -8,7 +8,9 @@ authentifiziert Hotspots, routet Gruppen- und Privatrufe zwischen Haushalten und
 Zonen, verfolgt Roaming-Teilnehmer und veröffentlicht Betriebsdaten über MQTT.
 SDS/SMS sowie AnyTone-Location-Telemetrie werden reassembliert; der lokale
 SDS-Echo-Dienst stellt erstmals auch einen bestätigten Rückweg zum Funkgerät
-bereit.
+bereit. Nicht direkt routbare Radio Checks suchen ihr Ziel zusätzlich über den
+Heimat-Master und einen authentifizierten Mesh-WHOIS; bleibt das Ziel offline,
+wird eine begrenzte Fallback-SDS dauerhaft vorgemerkt.
 
 ## Schnellstart
 
@@ -42,9 +44,11 @@ gewählte JSON-Datei und Umgebungsvariablen bis zu Kommandozeilenargumenten.
 - [Quick Start](docs/quick-start.adoc)
 - [Konfiguration und Setup-Wizard](docs/components/configuration.adoc)
 - [SDS-Echo-Dienst](docs/components/sds-echo.adoc)
+- [Radio-Check-Routing und Fallback-SDS](docs/components/radio-check-routing.adoc)
 - [MQTT-Integration](docs/components/mqtt.adoc)
 - [Location-Telemetrie und Privacy](docs/components/location-telemetry.adoc)
 - [Hardwaretestplan](docs/hardware-test-plan.adoc)
+- [Radio-Check-Resolver-Hardwaretest](docs/radio-check-resolver-hardware-plan.adoc)
 - [Aufgabenplanung](TODO.md)
 
 Die jeweils aktuelle Release-Version ist zusätzlich als PDF verfügbar:
@@ -84,10 +88,12 @@ make playground PLAYGROUND_ARGS='--config dmroute-playground.json'
 Login, Ping, Disconnect, Raw-DMRD und Capture-Szenarien lassen sich anschließend
 interaktiv testen. Profilbasierte virtuelle Funkgeräte senden unbestätigte SDS
 an Talkgroups, bestätigte SDS an reale oder virtuelle Teilnehmer und halten
-empfangene Nachrichten in einer Inbox. Ein typischer Lauf beginnt mit
+empfangene Nachrichten in einer Inbox. Call Alert und Radio Check funktionieren
+in beide Richtungen einschließlich automatischer Bestätigung und eigener
+Ereignis-Inbox. Ein typischer Lauf beginnt mit
 `login all`, `radio announce all` und beispielsweise
 `sds send radio1 tg 9 "Hallo"` oder
-`sds send radio1 service 990099 "ECHO Hallo"`. Tab-Completion,
+`radio check radio1 10001`. Tab-Completion,
 Sitzungsverlauf und Ctrl+R erleichtern interaktive Tests. Die vollständige Bedienung beschreibt die
 [Emulator-Dokumentation](docs/components/emulator.adoc). Der Test-Workflow stellt
 zusätzlich self-contained Single-File-Artefakte für Linux x64 und Windows x64

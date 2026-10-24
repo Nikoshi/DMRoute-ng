@@ -128,6 +128,24 @@ Leerzeichen werden in Anführungszeichen gesetzt.
 |Sendet einen privaten selbstadressierten CSBK. Seine Rückleitung bestätigt,
 dass der Master den privaten Pfad zum virtuellen Funkgerät gelernt hat.
 
+|`radio alert <quelle> <ziel-id>`
+|Sendet einen Call Alert an ein reales oder virtuelles Funkgerät und meldet
+Bestätigung oder Timeout.
+
+|`radio check <quelle> <ziel-id>`
+|Prüft die Erreichbarkeit eines realen oder virtuellen Funkgeräts und wartet
+auf dessen positive Radio-Check-Antwort.
+
+|`radio events <radio>`
+|Zeigt und entfernt alle ungelesenen Call-Alert- und Radio-Check-Ereignisse.
+
+|`radio watch <radio>`
+|Zeigt erst gepufferte und danach neue Control-Ereignisse; `Ctrl+C` kehrt zur
+Eingabe zurück.
+
+|`radio clear <radio>`
+|Entfernt alle ungelesenen Control-Ereignisse.
+
 |`sds send <radio> tg <ziel-id> "<text>"`
 |Sendet eine unbestätigte Gruppen-SDS mit höchstens 120 Zeichen.
 
@@ -172,6 +190,20 @@ eingehenden Frames, ohne sie sich gegenseitig wegzunehmen. Auch der Raw-Puffer
 hält die neuesten Frames; `status` meldet dessen Überlaufzähler, ohne den
 Hotspot oder den SDS-Empfang anzuhalten.
 
+Call Alert und Radio Check besitzen eine zweite begrenzte Inbox mit derselben
+konfigurierten Kapazität. Überlauf verwirft das älteste Control-Ereignis und
+erhöht einen eigenen Zähler. `radio list` zeigt SDS- und Control-Zähler
+getrennt. Eingehende gültige Anfragen werden automatisch beantwortet: Call
+Alert mit Opcode `0x20`, Radio Check mit dem Antwortbit `0x80`. Die Antwort
+folgt nach etwa 120 ms, entsprechend dem Hardwaremitschnitt.
+
+Ausgehende Control-Transaktionen verwenden bis zu drei vollständige Versuche
+und warten jeweils 2,5 Sekunden auf die Antwort. Call Alert besteht aus vier
+Control-Preambles und Opcode `0x1f`; Radio Check aus fünf Control-Preambles und
+Opcode `0x24`. Control-Preambles tragen kein Data-Content-Bit. Äußere und
+innere Teilnehmer-IDs, Feature-ID `0x10` und CSBK-CRC müssen beim Empfang
+zusammenpassen, bevor ein Ereignis ausgelöst oder eine Antwort gesendet wird.
+
 Private Nachrichten werden bis zu dreimal gesendet; zwischen vollständigen
 Versuchen wartet das virtuelle Funkgerät 2,5 Sekunden auf eine Quittung. Jeder
 Versuch beginnt wie im Hardwaremitschnitt mit fünf CSBK-Preambles. Eingehende
@@ -182,8 +214,11 @@ TMS-Inhalt ist `00 03 BF 00 01`. Der frühere einzelne DMR-Response-Header bleib
 als Kompatibilitäts-Fallback für ACK/NACK erhalten. Zustellberichte erscheinen
 nicht als Text in der Inbox und lösen keine weitere Quittung aus.
 
-Ein reales Ziel-FuG muss dem Master bereits durch eigenen Verkehr bekannt sein.
-Ein virtuelles Ziel wird vorher mit `radio announce` bekannt gemacht. Für den
+Ein reales Ziel-FuG sollte für gewöhnliche private SDS und Call Alert bereits
+durch eigenen Verkehr bekannt sein. Ein unbekanntes Radio-Check-Ziel kann der
+Master zusätzlich über Heimat-Zone, Roaming und Mesh-WHOIS suchen. Ein
+virtuelles Ziel wird für den normalen Direktpfad vorher mit `radio announce`
+bekannt gemacht. Für den
 Gegenversuch vom virtuellen zum realen FuG sollte die virtuelle ID als digitaler
 Kontakt im Zielgerät hinterlegt sein; beim getesteten manuellen Dial wurde ohne
 diesen Kontakt zwar der Text angezeigt, aber kein Zustellbericht erzeugt.
@@ -218,7 +253,7 @@ keine vollständige SDS-Transaktion.
 == Routinghinweise und Grenzen
 
 Der Playground importiert keine PCAP-Dateien und erzeugt keine semantischen
-Sprach- oder Radio-Check-Abläufe. Semantische SDS und der für `announce`
+Sprachabläufe. Semantische SDS, Call Alert, Radio Check und der für `announce`
 benötigte CSBK sind implementiert; weitere Writer und Szenarien bleiben
 Gegenstand von Issue #15. Eine Vollbild-TUI bleibt eine mögliche Ausbaustufe von
 Issue #14.

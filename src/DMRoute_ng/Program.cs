@@ -120,6 +120,16 @@ internal static class DmRouteApplication
         builder.Services.AddSingleton<SdsEchoService>();
         builder.Services.AddSingleton<ISdsService>(sp => sp.GetRequiredService<SdsEchoService>());
         builder.Services.AddHostedService(sp => sp.GetRequiredService<SdsEchoService>());
+        builder.Services.AddSingleton<FallbackSdsService>();
+        builder.Services.AddSingleton<ISdsService>(sp => sp.GetRequiredService<FallbackSdsService>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<FallbackSdsService>());
+        builder.Services.AddSingleton(sp => new RadioCheckOutbox(
+            sp.GetRequiredService<ILogger<RadioCheckOutbox>>(),
+            settings.RadioCheck.OutboxPath,
+            settings.RadioCheck.FallbackCapacity,
+            DateTime.UtcNow.Ticks));
+        builder.Services.AddSingleton<RadioCheckReachabilityCoordinator>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<RadioCheckReachabilityCoordinator>());
         builder.Services.AddSingleton<SdsServiceRegistry>();
 
         builder.Services.AddSingleton<RawMqttClient>(_ =>

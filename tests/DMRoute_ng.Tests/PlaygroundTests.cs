@@ -44,6 +44,8 @@ public sealed class PlaygroundTests
         Assert.Equal(["service"], completer.Complete("sds send radio1 ser", 19).Candidates);
         Assert.Equal(["990099"], completer.Complete("sds send radio1 service 99", 28).Candidates);
         Assert.Contains("hs2", completer.Complete("login h", 7).Candidates);
+        Assert.Equal(["alert"], completer.Complete("radio al", 8).Candidates);
+        Assert.Equal(["radio1", "radio2"], completer.Complete("radio check rad", 15).Candidates);
     }
 
     [Fact]
@@ -242,12 +244,15 @@ public sealed class PlaygroundTests
         var output = new StringWriter();
 
         await repl.RunAsync(new StringReader(
-            "status\nradio list\nsds inbox radio1\nsds clear radio1\nunknown\nexit\n"), output);
+            "status\nradio list\nradio events radio1\nradio clear radio1\n" +
+            "sds inbox radio1\nsds clear radio1\nunknown\nexit\n"), output);
 
         Assert.Contains("hs1: ID 1000001", output.ToString());
         Assert.Contains("radio1: FuG 10001", output.ToString());
         Assert.Contains("radio1: Inbox leer", output.ToString());
         Assert.Contains("radio1: 0 SDS entfernt", output.ToString());
+        Assert.Contains("radio1: keine Control-Ereignisse", output.ToString());
+        Assert.Contains("radio1: 0 Control-Ereignisse entfernt", output.ToString());
         Assert.Contains("Unbekannter Befehl", output.ToString());
         Assert.DoesNotContain("secret1000001", output.ToString());
     }

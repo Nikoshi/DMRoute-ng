@@ -22,8 +22,8 @@ wird `dmroute.json` im aktuellen Verzeichnis bearbeitet. `--config <Pfad>` und
 er startet den Router nicht.
 
 Der Wizard benötigt ein interaktives Ein- und Ausgabeterminal. Pfeiltasten wählen
-ein Feld, `Enter` bearbeitet es, `Leertaste` schaltet Location-Privacy oder den
-SDS-Echo-Dienst um, `A` blendet die erweiterten Werte ein oder aus, `F10` oder
+ein Feld, `Enter` bearbeitet es, `Leertaste` schaltet Location-Privacy, den
+SDS-Echo-Dienst oder Radio-Check-Optionen um, `A` blendet die erweiterten Werte ein oder aus, `F10` oder
 `S` speichert und `Esc` bricht ohne Änderung ab. PSKs erscheinen nur maskiert.
 Das Überschreiben einer vorhandenen Datei muss bestätigt werden.
 
@@ -67,6 +67,15 @@ Beispiel `Mqtt__Host=mqtt.example.net`.
     "MaxActiveCalls": 256,
     "MaxLocalDeviceRoutes": 8192
   },
+  "RadioCheck": {
+    "Enabled": true,
+    "MaxPending": 128,
+    "FallbackSdsEnabled": true,
+    "FallbackServiceId": 990098,
+    "FallbackTtlHours": 24,
+    "FallbackCapacity": 128,
+    "OutboxPath": "data/radio-check-outbox.json"
+  },
   "Sds": {
     "MaxSessions": 128,
     "MaxMessageBytes": 4096
@@ -92,7 +101,9 @@ Beispiel `Mqtt__Host=mqtt.example.net`.
 
 Der Basismodus zeigt Zone, PSKs, MQTT-Verbindung und Location-Privacy. Der
 erweiterte Modus zeigt die vorab reservierten Routing-, SDS- und MQTT-Kapazitäten
-sowie `Services:Echo:Enabled`. DMRoute-ng validiert dieselben Regeln beim
+sowie `Services:Echo:Enabled` und die Radio-Check-/Fallback-Werte. Die Outbox
+wird relativ zum Arbeitsverzeichnis aufgelöst; der Prozess benötigt
+Schreibrechte auf ihr Zielverzeichnis. DMRoute-ng validiert dieselben Regeln beim
 Speichern und bei jedem normalen Start. Es gibt kein Live-Reload; eine geänderte
 Datei wird beim nächsten Prozessstart eingelesen.
 

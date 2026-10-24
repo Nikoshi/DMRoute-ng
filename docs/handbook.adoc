@@ -14,6 +14,8 @@ include::components/configuration.adoc[leveloffset=+1]
 
 include::components/sds-echo.adoc[leveloffset=+1]
 
+include::components/radio-check-routing.adoc[leveloffset=+1]
+
 include::components/mqtt.adoc[leveloffset=+1]
 
 include::components/location-telemetry.adoc[leveloffset=+1]

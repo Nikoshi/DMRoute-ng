@@ -21,12 +21,17 @@ sds send radio1 fug 10002 "Hallo Funkgerät"
 sds send radio1 service 990099 "ECHO Playground"
 sds inbox radio1
 sds watch radio1
+radio alert radio1 10002
+radio check radio1 10002
+radio events radio1
+radio watch radio1
 ```
 
 Im interaktiven Terminal stehen `Tab`-Completion, Verlauf mit `Pfeil hoch` und
 `Pfeil runter` sowie Rückwärtssuche mit `Ctrl+R` bereit. Bestätigte private SDS
 warten 2,5 Sekunden auf einen TMS-Zustellbericht, bevor der nächste Versuch
-beginnt.
+beginnt. Call Alert und Radio Check verwenden dasselbe Antwortfenster und werden
+von virtuellen Zielgeräten automatisch bestätigt.
 
 Die vollständige Beschreibung steht in der
 [Emulator-Dokumentation](https://github.com/Nikoshi/DMRoute-ng/blob/main/docs/components/emulator.adoc).
