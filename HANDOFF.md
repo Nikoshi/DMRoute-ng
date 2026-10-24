@@ -1,8 +1,16 @@
 # DMRoute-ng handoff
 
-## Active work: masterübergreifender Radio-Check-Resolver auf dem SDS/echo-Feature-Branch
+## Active work: gestapelter Struktur- und Dokumentations-PR
 
-- Work is on `feat/issue-10-sds-echo`, based on `origin/main` at `acc4860`.
+- Die Arbeit liegt auf `refactor/application-structure` und baut direkt auf
+  `feat/issue-10-sds-echo` beziehungsweise Draft-PR #26 auf.
+- Radio-Check-Resolver, Router, MQTT-Integration und SDS-Echo sind als partielle
+  Klassen nach Verantwortung gegliedert. Methodenrümpfe, Signaturen,
+  Protokollwerte, Timings und DI-Registrierungen bleiben unverändert.
+- Fachliche Kommentare dokumentieren Span-Lebensdauer, Puffergrößen,
+  Wire-Authentisierung, Auflösungsreihenfolge, Replay-Schutz und Zustandsbesitz.
+- Nur berührte Dateien werden formatiert; unabhängige Tests und FEC-Tabellen
+  bleiben aus dem Diff.
 - The branch contains the confirmed outbound SDS transport and an internal echo service as the first hardware-testable slice of issue #10.
 - The general external API and its delivery result contract are not implemented yet.
 - Die capture-verifizierten Radio-Check-Codecs werden jetzt produktiv für die
@@ -18,9 +26,9 @@
 
 ## Objective
 
-Nicht direkt routbare Radio Checks über Heimat-Zone, Roaming und einen
-authentifizierten WHOIS-Fanout auflösen. Ist kein Pfad bekannt, eine bestätigte
-Fallback-SDS dauerhaft bis zur nächsten Sichtung des Ziels puffern.
+Die großen Anwendungsdienste ohne Verhaltensänderung nach Verantwortlichkeiten
+gliedern und die nicht offensichtlichen Protokoll-, Speicher- und
+Nebenläufigkeitsverträge im Code festhalten.
 
 ## Decisions
 
@@ -177,6 +185,10 @@ Fallback-SDS dauerhaft bis zur nächsten Sichtung des Ziels puffern.
 
 ## Validation
 
+- Für den Struktur- und Dokumentationsstand sind die gezielte
+  `dotnet format`-Prüfung aller berührten C#-Dateien, `git diff --check`,
+  `make test` mit 130/130 Tests und der lokale NativeAOT-Publish für
+  `osx-arm64` erfolgreich. Build und Tests melden 0 Warnungen.
 - Release build succeeds with 0 warnings and 0 errors.
 - `make test` passes 130/130 tests in Release mode with 0 build warnings.
 - Codec tests reproduce captured UTF-16LE TMS datagrams, BPTC/trellis bursts and confirmed-message CRCs byte-for-byte.
@@ -319,7 +331,7 @@ Fallback-SDS dauerhaft bis zur nächsten Sichtung des Ziels puffern.
 
 ## Precise next step
 
-Die Gerätekompatibilitätsfälle `DC01` bis `DC09` mit dem funktionierenden
-physischen Hotspot und einem Playground-Hotspot ausführen. Nach Reparatur des
-zweiten Hotspots folgen `DC10` sowie RCR06 bis RCR09 für Heimatpfad, Roaming,
-WHOIS und persistente Outbox-Übergabe.
+Den gestapelten Aufräum-PR nach dem Merge von #26 auf `main` umstellen und zur
+Prüfung freigeben. Funktional folgen weiterhin `DC01` bis `DC09` mit dem
+funktionierenden physischen Hotspot und einem Playground-Hotspot. Nach Reparatur
+des zweiten Hotspots folgen `DC10` sowie RCR06 bis RCR09.

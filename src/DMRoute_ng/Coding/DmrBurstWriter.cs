@@ -15,9 +15,19 @@ public readonly record struct DmrControlMessage(
     int SourceId,
     int DestinationId);
 
+/// <summary>
+/// Schreibt und liest die von DMRoute-ng unterstützten DMR-Daten- und Kontrollbursts.
+/// </summary>
+/// <remarks>
+/// Alle Writer arbeiten ausschließlich in aufruferverwalteten Puffern. Ein kodierter
+/// Burst belegt <see cref="BurstLength"/> Byte, ein vollständiges Homebrew-DMRD-Paket
+/// <see cref="DmrdLength"/> Byte. Die Methoden behalten keine übergebenen Spans.
+/// </remarks>
 public static class DmrBurstWriter
 {
+    /// <summary>Länge des im DMRD-Paket transportierten DMR-Bursts.</summary>
     public const int BurstLength = 33;
+    /// <summary>Länge eines vollständigen Homebrew-DMRD-Datagramms.</summary>
     public const int DmrdLength = 53;
     private const ushort CsbkMask = 0xA5A5;
     private const ushort DataHeaderMask = 0xCCCC;
@@ -55,6 +65,10 @@ public static class DmrBurstWriter
         Span<byte> destination, int sourceId, int destinationId, byte colorCode = 1) =>
         WriteControl(destination, 0xA4, 0x00, 0x80, destinationId, sourceId, colorCode);
 
+    /// <summary>
+    /// Dekodiert eine vollständige, CRC-gültige Call-Alert- oder Radio-Check-PDU.
+    /// Äußere DMRD-IDs und innere CSBK-IDs müssen zueinander passen.
+    /// </summary>
     public static bool TryReadControlMessage(ReadOnlySpan<byte> dmrd, out DmrControlMessage message)
     {
         message = default;
@@ -202,6 +216,8 @@ public static class DmrBurstWriter
         return true;
     }
 
+    /// <summary>Schreibt einen Burst mit Homebrew-Header in einen DMRD-Puffer.</summary>
+    /// <remarks>Es werden genau <see cref="DmrdLength"/> Byte des Zielpuffers beschrieben.</remarks>
     public static void WriteDmrd(
         Span<byte> destination,
         ReadOnlySpan<byte> burst,

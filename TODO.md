@@ -37,6 +37,16 @@ Der vollständige Ablauf steht im
 und einen getrennten Playground-Hotspot. Etappe B folgt nach Reparatur des
 zweiten Hotspots mit zwei isolierten RF-Endpunkten.
 
+## Codepflege
+
+- Der Branch `refactor/application-structure` gliedert Radio-Check-Resolver,
+  Router, MQTT-Integration und SDS-Echo nach Verantwortung, ohne das
+  Laufzeitverhalten oder öffentliche Signaturen zu ändern.
+- Fachliche Codekommentare beschreiben Protokollformate, geliehene Spans,
+  Pufferbesitz, begrenzte Zustände und Replay-Schutz.
+- Der Aufräum-PR wird auf Draft-PR #26 gestapelt und nach dessen Merge auf
+  `main` umgestellt.
+
 ## 1. SDS-Echo-Dienst (#10)
 
 ### Aktueller Stand

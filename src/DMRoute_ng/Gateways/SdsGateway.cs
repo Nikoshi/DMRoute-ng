@@ -7,6 +7,10 @@ using Microsoft.Extensions.Logging;
 
 namespace DMRoute_ng.Gateways;
 
+/// <summary>
+/// Setzt begrenzt viele eingehende SDS-Datenströme zusammen und veröffentlicht
+/// vollständige TMS-Nachrichten, Zustellberichte und Positionsmeldungen.
+/// </summary>
 public sealed class SdsGateway
 {
     private struct SessionState
@@ -32,6 +36,10 @@ public sealed class SdsGateway
     private long _droppedSessions;
     private long _oversizedMessages;
 
+    /// <summary>
+    /// Verarbeitet eine vollständige SDS. <paramref name="textBytes"/> verweist auf
+    /// Gateway-Speicher und ist nur während des synchronen Rückrufs gültig.
+    /// </summary>
     public delegate void SdsMessageHandler(in SdsMessageEvent message, ReadOnlySpan<byte> textBytes);
     public delegate void SdsLocationHandler(in DmrLocationEvent location);
     public delegate void SdsDeliveryReportHandler(in SdsDeliveryReportEvent report);

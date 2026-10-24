@@ -5,6 +5,10 @@ using System.Net.Sockets;
 
 namespace DMRoute_ng.Types;
 
+/// <summary>
+/// Kompakte IPv4-Endpunktdarstellung für Routingtabellen und Hot Paths.
+/// Adresse und Port werden ohne verwaltete Netzwerkobjekte gespeichert.
+/// </summary>
 public readonly struct Ipv4Endpoint(uint address, ushort port) : IEquatable<Ipv4Endpoint>
 {
     public uint Address { get; } = address;

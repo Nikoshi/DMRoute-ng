@@ -3,6 +3,13 @@ using System.Buffers;
 
 namespace DMRoute_ng.Integration;
 
+/// <summary>
+/// Schreibt kleine JSON-Objekte direkt in einen aufruferverwalteten UTF-8-Puffer.
+/// </summary>
+/// <remarks>
+/// Der Builder besitzt keine Kapazitätsverwaltung. Der Aufrufer muss den Puffer für
+/// den vollständigen Payload dimensionieren und den Inhalt vor Ende des Scopes verbrauchen.
+/// </remarks>
 public ref struct JsonSpanBuilder
 {
     private readonly Span<byte> _buffer;
@@ -29,19 +36,19 @@ public ref struct JsonSpanBuilder
         else _firstElement = false;
     }
 
-    // Neu: Startet ein neues Objekt innerhalb eines Arrays
+    /// <summary>Beginnt das nächste Objekt eines Array-Wurzelelements.</summary>
     public void StartArrayObject()
     {
         WriteComma();
         WriteByte((byte)'{');
-        _firstElement = true; // Reset für die inneren Keys
+        _firstElement = true;
     }
 
-    // Neu: Beendet das aktuelle Objekt im Array
+    /// <summary>Beendet das aktuelle Objekt eines Array-Wurzelelements.</summary>
     public void EndArrayObject()
     {
         WriteByte((byte)'}');
-        _firstElement = false; 
+        _firstElement = false;
     }
 
     private void AppendKey(ReadOnlySpan<byte> key)
@@ -107,7 +114,7 @@ public ref struct JsonSpanBuilder
         _offset += value.Length;
         WriteByte((byte)'"');
     }
-    
+
     public void AppendString(ReadOnlySpan<byte> key, string? value)
     {
         AppendKey(key);
@@ -160,8 +167,7 @@ public ref struct JsonSpanBuilder
         value &= 0x0F;
         WriteByte((byte)(value < 10 ? '0' + value : 'A' + value - 10));
     }
-    
-    // Optional, aber nützlich für bools
+
     public void AppendBool(ReadOnlySpan<byte> key, bool value)
     {
         AppendKey(key);
@@ -169,11 +175,11 @@ public ref struct JsonSpanBuilder
         valSpan.CopyTo(_buffer.Slice(_offset));
         _offset += valSpan.Length;
     }
-    
+
     public void Finish()
     {
         WriteByte((byte)(_isArrayRoot ? ']' : '}'));
     }
 
-    
+
 }
