@@ -16,6 +16,8 @@ include::radio-check-capture-plan.adoc[leveloffset=+1]
 
 include::radio-check-resolver-hardware-plan.adoc[leveloffset=+1]
 
+include::voice-codec-hardware-plan.adoc[leveloffset=+1]
+
 include::hardware-test-results-2026-09-12.adoc[leveloffset=+1]
 
 include::hardware-test-results-2026-09-13-location.adoc[leveloffset=+1]

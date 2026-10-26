@@ -1,6 +1,6 @@
 # Aufgabenplanung
 
-Stand: 24. Oktober 2026
+Stand: 26. Oktober 2026
 
 Diese Datei fasst die geplanten Arbeiten und ihre Abhängigkeiten zusammen. Die
 GitHub-Issues bleiben die verbindliche Quelle für Anforderungen und Diskussionen.
@@ -14,7 +14,7 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 2 | [#9 Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Golden Vector vorhanden; `DC01` bis `DC04` und `DC10` offen | für `DC10` zwei getrennte RF-Endpunkte |
 | 3 | [#24 Authentifizierte SDS-Sendeschnittstelle](https://github.com/Nikoshi/DMRoute-ng/issues/24) | Sicherheits- und API-Konzept erforderlich | Hardwareabschluss #10 |
 | 4 | [#25 CLI für SDS-Versand](https://github.com/Nikoshi/DMRoute-ng/issues/25) | Planung nach Festlegung der Schnittstelle | #10 und #24 |
-| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | SDS, Call Alert und Radio Check umgesetzt; Sprache offen | #9 und #10 |
+| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Sprache mit OpenDMR im Playground umgesetzt; Hardwareabnahme `VC03` bis `VC09` offen | funktionierender Hotspot; AnyTone und RT3S |
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Resolver, Blind-Probe, WHOIS und Offline-Fallback umgesetzt; Ein-Master-Hardwarelauf teilweise bestanden | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
 | 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit SDS und Control-Transaktionen umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
@@ -110,9 +110,17 @@ Bestätigung sind ebenfalls umgesetzt. Der Playground bietet dafür zusätzlich
 Service-Ziele, Completion, Verlauf und Ctrl+R-Suche.
 Call Alert und Radio Check funktionieren capture-basiert in beide Richtungen,
 einschließlich automatischer Antwort, Retry/Timeout und Ereignis-Inbox.
-Semantische Sprache bleibt offen.
-Gemeinsam genutzte Codecs liegen in `DMRoute_ng.Protocol` und bleiben von der
-Serverassembly entkoppelt.
+Der Playground wandelt mit dem getrennten OpenDMR-1.0.0-Prozess 8-kHz-Mono-WAV
+in reproduzierbare Gruppen- und Privatsprachszenarien um. Der Rückweg akzeptiert
+rohe AMBE-Dateien oder genau einen vollständigen unverschlüsselten DMRD-Ruf und
+erzeugt WAV. DMR-Interleave, Full LC, Voice-Sync, eingebettete Link Control und
+Terminatoren liegen im gemeinsamen `DMRoute_ng.Protocol`; Prozessadapter und
+WAV-Verarbeitung liegen in `DMRoute_ng.Audio`. Der Produktionsserver bleibt
+vom Codec getrennt.
+
+Open sind die Geräteprüfungen `VC03` bis `VC09` aus
+`docs/voice-codec-hardware-plan.adoc`. Telegram-, Opus- und Live-Audio-Anbindung
+folgen erst nach dieser Abnahme.
 
 ## 6. Masterinitiierter Radio Check (#21)
 
@@ -152,10 +160,10 @@ Raw-DMRD, spielt Capture-Szenarien ab und zeigt Frames sowie SDS-Inboxen an.
 Profile werden lokal mit restriktiven Dateirechten gespeichert; Linux- und
 Windows-Builds entstehen als CI-Artefakte.
 
-Semantische Befehle für Sprache folgen nach den Writern aus #15. Die
-Control-Befehle sind inzwischen umgesetzt; nach der semantischen
-Sprachunterstützung wird bewertet, ob die REPL genügt oder eine Vollbild-TUI
-echten Mehrwert bietet.
+Semantische Sprachdateien werden außerhalb der REPL mit `voice encode` und
+`voice decode` verarbeitet und anschließend mit `run` abgespielt. Nach der
+Hardwareabnahme wird bewertet, ob die REPL genügt oder eine Vollbild-TUI echten
+Mehrwert bietet.
 
 ## 9. Nix Flake (#23)
 

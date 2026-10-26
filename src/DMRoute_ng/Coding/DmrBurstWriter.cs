@@ -246,6 +246,26 @@ public static class DmrBurstWriter
         burst[..BurstLength].CopyTo(destination[20..53]);
     }
 
+    /// <summary>Schreibt ein DMRD-Paket für Voice-Sync oder einen nummerierten Sprachburst.</summary>
+    public static void WriteVoiceDmrd(
+        Span<byte> destination, ReadOnlySpan<byte> burst, byte sequence, int sourceId, int destinationId,
+        int repeaterId, uint streamId, byte voiceIndex, int timeslot = 2, bool isGroupCall = false)
+    {
+        if (voiceIndex > 5) throw new ArgumentOutOfRangeException(nameof(voiceIndex));
+        if (destination.Length < DmrdLength) throw new ArgumentException("DMRD output must contain 53 bytes.", nameof(destination));
+        if (burst.Length < BurstLength) throw new ArgumentException("A DMR burst contains 33 bytes.", nameof(burst));
+        "DMRD"u8.CopyTo(destination);
+        destination[4] = sequence;
+        WriteId(destination[5..8], sourceId);
+        WriteId(destination[8..11], destinationId);
+        BinaryPrimitives.WriteInt32BigEndian(destination[11..15], repeaterId);
+        if (timeslot is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(timeslot));
+        destination[15] = (byte)((timeslot == 2 ? 0x80 : 0) | (isGroupCall ? 0 : 0x40) |
+                                 (voiceIndex == 0 ? 0x10 : voiceIndex));
+        BinaryPrimitives.WriteUInt32BigEndian(destination[16..20], streamId);
+        burst[..BurstLength].CopyTo(destination[20..53]);
+    }
+
     private static void WriteSlotTypeAndSync(Span<byte> burst, byte colorCode, byte dataType)
     {
         if (burst.Length < BurstLength) throw new ArgumentException("A DMR burst contains 33 bytes.", nameof(burst));

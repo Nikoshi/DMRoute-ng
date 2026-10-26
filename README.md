@@ -97,4 +97,8 @@ Ereignis-Inbox. Ein typischer Lauf beginnt mit
 Sitzungsverlauf und Ctrl+R erleichtern interaktive Tests. Die vollständige Bedienung beschreibt die
 [Emulator-Dokumentation](docs/components/emulator.adoc). Der Test-Workflow stellt
 zusätzlich self-contained Single-File-Artefakte für Linux x64 und Windows x64
-bereit; sie sind bewusst noch keine regulären Release-Dateien.
+bereit. Das Linux-x64-Release enthält zusätzlich den getrennten OpenDMR-Codec
+und dessen vollständige GPL-Quellen. Damit wandelt der Playground WAV-Dateien
+in reproduzierbare DMRD-Sprachszenarien um und dekodiert unverschlüsselte
+Sprachszenarien wieder nach WAV. Build, Bedienung und Grenzen stehen ebenfalls
+in der Emulator-Dokumentation.

@@ -1,0 +1,98 @@
+= Hardwaretestplan für OpenDMR-Sprachszenarien
+:toc:
+:sectnums:
+
+== Ziel
+
+Der Test weist nach, dass die vom Playground erzeugten unverschlüsselten
+Sprachrufe über MMDVM-Hotspots von AnyTone- und RT3S-Funkgeräten verstanden
+werden und dass Mitschnitte beider Geräte wieder als WAV dekodiert werden. Die
+Geräte werden getrennt bewertet, da sie Link Control, Rufbeginn und Rufende
+unterschiedlich behandeln können.
+
+== Voraussetzungen
+
+* DMRoute-ng und Playground aus demselben Commit;
+* mit `make opendmr-codec` gebauter Codec oder Linux-x64-Releasepaket;
+* ein funktionierender MMDVM-Hotspot, später zwei getrennte RF-Endpunkte;
+* AnyTone und RT3S mit bekannten DMR-IDs, gleicher Color Code und passenden
+  Talkgroups beziehungsweise Kontakten;
+* 8-kHz-Mono-PCM-WAV mit einer deutlich gesprochenen Kennung und mindestens
+  drei Sekunden Dauer;
+* Paketmitschnitt am Master sowie Audioaufnahme am empfangenden Gerät.
+
+Verschlüsselte Rufe sind ausgeschlossen. Vor dem Senden werden Frequenz,
+Sendeleistung und lokale Betriebsregeln geprüft.
+
+== Testfälle
+
+[cols="1,2,3,2",options="header"]
+|===
+|ID |Aufbau |Durchführung |Erfolgskriterium
+
+|VC01
+|lokaler Codec
+|WAV für TG und FuG kodieren, beide DMRD-Dateien wieder dekodieren.
+|Länge entspricht der auf 60 ms aufgefüllten Eingabe; keine Strukturfehler.
+
+|VC02
+|Playground zu virtuellem Hotspot
+|Szenario abspielen und ausgehende DMRD-Folge mitschneiden.
+|Drei Header, lückenlose Voice-Zählung `0` bis `5`, eingebettete LC und zwei
+Terminatoren; IDs, Slot und Stream bleiben konstant.
+
+|VC03
+|Playground zu AnyTone
+|TG-Ruf dreimal senden und empfangene Kennung protokollieren.
+|Alle Durchläufe öffnen den Lautsprecher; Kennung ist verständlich; Ruf endet
+ohne Hängenbleiben.
+
+|VC04
+|Playground zu RT3S
+|VC03 mit identischem Szenario wiederholen.
+|Bewertung getrennt von AnyTone; Abweichungen bei Rufbeginn oder Terminator
+werden mit Frameposition dokumentiert.
+
+|VC05
+|Playground zu jedem Gerät
+|Privatruf an das jeweils andere Gerät senden.
+|Ziel-ID und Private-Flag werden erkannt; kein unbeteiligtes Gerät öffnet.
+
+|VC06
+|AnyTone zu Master
+|Mindestens drei Sekunden sprechen, vollständigen einzelnen Stream als
+`.dmrd` sichern und mit `voice decode` wandeln.
+|WAV ist abspielbar, zeitlich vollständig und enthält die gesprochene Kennung.
+
+|VC07
+|RT3S zu Master
+|VC06 mit dem RT3S wiederholen.
+|WAV ist abspielbar; gerätespezifische Header-, EMB- oder Terminatorvarianten
+sind erfasst.
+
+|VC08
+|negative Dateien
+|Je eine Sequenznummer entfernen, Streams mischen, Terminator entfernen und
+Privacy-Bit setzen.
+|Der Decoder lehnt jede Datei mit einer fachlich passenden Meldung ab.
+
+|VC09
+|zwei RF-Endpunkte
+|Nach Reparatur des zweiten Hotspots je einen TG- und Privatruf über den Master
+routen.
+|Nur der vorgesehene Routingpfad sendet; Ursprung erhält kein Gruppenecho.
+|===
+
+== Aufzeichnung
+
+Für jeden Lauf werden Commit, Codec-Version, Gerätefirmware, Hotspot-Firmware,
+Color Code, Slot, Quell- und Ziel-ID, PCAP-Datei, erzeugtes Szenario,
+dekodierte WAV-Datei und das hörbare Ergebnis notiert. Rohdateien mit lokalen
+IDs oder Sprache bleiben außerhalb des Repositorys; der Ergebnisbericht erhält
+nur sanitisierten Hexausschnitt, Prüfsummen und die beobachteten Unterschiede.
+
+== Reihenfolge
+
+VC01 und VC02 benötigen keine RF-Hardware. Danach folgen VC03 bis VC08 mit dem
+funktionierenden Hotspot. VC09 wird erst nach Reparatur des zweiten
+Antennenanschlusses durchgeführt.

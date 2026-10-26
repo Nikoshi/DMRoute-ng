@@ -1,6 +1,33 @@
 # DMRoute-ng handoff
 
-## Active work: gestapelter Struktur- und Dokumentations-PR
+## Active work: OpenDMR-Sprachszenarien
+
+- Branch: `feat/opendmr-playground-voice`, gestapelt auf
+  `refactor/application-structure`/PR #27.
+- OpenDMR 1.0.0 ist unverändert unter `third_party/OpenDMR` auf Commit
+  `d28164b39ba4d91ad5948ff22707937f8944f70f` festgelegt. Der Codec läuft als
+  eigener Prozess; der Produktionsserver referenziert `DMRoute_ng.Audio` nicht.
+- `voice encode` erzeugt aus 8-kHz-Mono-PCM-WAV ein reproduzierbares
+  `.dmrd`-Szenario für Gruppen- oder Privatrufe. `voice decode` verarbeitet
+  rohe AMBE-Dateien oder einen vollständigen unverschlüsselten DMRD-Ruf.
+- Explizites `--open-dmr` hat Vorrang vor `Codec:OpenDmrExecutable`, dem
+  Programmverzeichnis und `PATH`. Bestehende Playground-Argumente bleiben
+  gültig; Profile ohne `Codec` werden weiterhin geladen.
+- `DmrVoiceBurstCodec` und `DmrVoiceBurstWriter` erzeugen drei kanonische
+  AMBE-Frames je Burst, Voice-Sync, Full LC, Embedded LC und Terminatoren ohne
+  verwaltete Allokationen im warmgelaufenen Pfad.
+- `make opendmr-codec` baut in `artifacts/opendmr`, damit die vendorten Quellen
+  sauber bleiben. Linux-x64-Test- und Releasepakete enthalten Codec, Lizenz,
+  Credits und vollständiges Quellarchiv; Windows bleibt ohne Codec nutzbar.
+- Der Hardwaretestplan `docs/voice-codec-hardware-plan.adoc` trennt AnyTone und
+  RT3S ausdrücklich. Seine Durchführung ist auf später verschoben.
+- Lokale Prüfung: OpenDMR baut auf macOS ARM64 und meldet Version 1.0.0. Ein
+  480-Sample-WAV wurde über `voice encode` nach DMRD und über `voice decode`
+  zurück nach WAV gewandelt. `make test` besteht mit 136/136 Tests,
+  `make docs` ohne Warnung und der Server-Publish für `osx-arm64` mit
+  `PublishAot=true`.
+
+## Basis: gestapelter Struktur- und Dokumentations-PR
 
 - Die Arbeit liegt auf `refactor/application-structure` und baut direkt auf
   `feat/issue-10-sds-echo` beziehungsweise Draft-PR #26 auf.
@@ -331,7 +358,8 @@ Nebenläufigkeitsverträge im Code festhalten.
 
 ## Precise next step
 
-Den gestapelten Aufräum-PR nach dem Merge von #26 auf `main` umstellen und zur
-Prüfung freigeben. Funktional folgen weiterhin `DC01` bis `DC09` mit dem
-funktionierenden physischen Hotspot und einem Playground-Hotspot. Nach Reparatur
-des zweiten Hotspots folgen `DC10` sowie RCR06 bis RCR09.
+Die vollständige Release-Test- und Dokumentationsprüfung abschließen, den
+Feature-Branch committen und als gestapelten PR auf
+`refactor/application-structure` öffnen. Issue #15 danach um Implementierung,
+PR und die weiterhin offenen Hardwarefälle `VC03` bis `VC09` ergänzen, ohne es
+manuell zu schließen.

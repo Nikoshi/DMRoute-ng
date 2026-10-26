@@ -70,7 +70,7 @@ Standardnamen `dmroute-playground.json` von Git ausgeschlossen. Ein Profil
 enthält mindestens einen und höchstens 64 eindeutig benannte Hotspots. Jedes
 Funkgerät erhält einen eindeutigen Namen, eine fünfstellige DMR-ID, einen
 vorhandenen Hotspot, Timeslot 1 oder 2 sowie seine Talkgroups. Ältere Profile
-ohne `Radios` bleiben gültig.
+ohne `Radios` oder `Codec` bleiben gültig.
 
 [source,json]
 ----
@@ -84,6 +84,15 @@ ohne `Radios` bleiben gültig.
     "InboxCapacity": 128
   }
 ]
+----
+
+Für den lokal gebauten OpenDMR-Codec kann das Profil einen Pfad enthalten:
+
+[source,json]
+----
+"Codec": {
+  "OpenDmrExecutable": "artifacts/opendmr/dmr_codec"
+}
 ----
 
 === Befehle
@@ -223,6 +232,69 @@ Gegenversuch vom virtuellen zum realen FuG sollte die virtuelle ID als digitaler
 Kontakt im Zielgerät hinterlegt sein; beim getesteten manuellen Dial wurde ohne
 diesen Kontakt zwar der Text angezeigt, aber kein Zustellbericht erzeugt.
 
+=== Sprachszenarien mit OpenDMR
+
+Der Sprachcodec läuft als eigener Prozess. Der Playground linkt keine
+OpenDMR-Bibliothek in die .NET-Anwendung und der Server lädt keinen Codec. Der
+Produktionspfad und seine NativeAOT-Eigenschaften bleiben dadurch unverändert.
+OpenDMR 1.0.0 ist auf Commit
+`d28164b39ba4d91ad5948ff22707937f8944f70f` festgelegt. Lizenz und
+Urheberrechtshinweise stehen in `THIRD-PARTY-NOTICES.md` und unter
+`third_party/OpenDMR/`.
+
+Der Codec wird unter macOS und Linux aus einer Arbeitskopie gebaut. Die
+vendorten Quellen bleiben dabei unverändert:
+
+[source,shell]
+----
+make opendmr-codec
+make playground-codec PLAYGROUND_ARGS='voice info'
+----
+
+`make opendmr-codec` legt das Programm unter
+`artifacts/opendmr/dmr_codec` ab. Das Linux-x64-Release des Playgrounds enthält
+`dmr_codec`, Lizenz, Credits und ein Archiv der zugehörigen Quellen. Das
+Windows-Artefakt bleibt ausführbar, enthält aber keinen Codec.
+
+Die Suche nach dem Codec erfolgt in dieser Reihenfolge:
+
+. explizites Kommandozeilenargument `--open-dmr <pfad>`;
+. `Codec:OpenDmrExecutable` im Playground-Profil;
+. `dmr_codec` neben dem Playground-Programm;
+. `dmr_codec` aus `PATH`.
+
+Das Kommandozeilenargument hat Vorrang vor dem Profil. Die bisherigen
+Argumente `--setup`, `--config` und `--help` behalten ihre Bedeutung.
+
+[source,shell]
+----
+DMRoute-ng-playground --open-dmr ./dmr_codec voice info
+DMRoute-ng-playground --config dmroute-playground.json --open-dmr ./dmr_codec \
+  voice encode radio1 tg 9 ansage.wav ansage.dmrd
+DMRoute-ng-playground --config dmroute-playground.json --open-dmr ./dmr_codec \
+  voice encode radio1 fug 10101 ansage.wav ansage.dmrd
+DMRoute-ng-playground --open-dmr ./dmr_codec \
+  voice decode ansage.dmrd ansage-kontrolle.wav
+DMRoute-ng-playground --config dmroute-playground.json
+----
+
+Die erzeugte Datei wird in der REPL mit `run <hotspot> ansage.dmrd` abgespielt.
+`voice encode` übernimmt DMR-ID, Timeslot und Hotspot aus dem gewählten
+Funkgerätprofil. Es akzeptiert RIFF/WAVE mit PCM, einem Kanal, 8000 Hz und 16
+Bit Little Endian. Fehlende Samples am Ende werden mit Stille auf den nächsten
+60-ms-Sprachburst aufgefüllt. Das Szenario enthält drei Voice-LC-Header,
+Sprachbursts mit Voice-Sync und eingebetteter Link Control sowie zwei
+Terminatoren. Die Stream-ID wird reproduzierbar aus Quelle, Ziel und AMBE-Daten
+gebildet.
+
+`voice decode` akzeptiert rohe `.ambe`-Dateien mit 9 Byte je 20-ms-Frame oder
+eine `.dmrd`-Szenariodatei. Bei DMRD muss genau ein vollständiger,
+unverschlüsselter Sprachruf enthalten sein. Lücken, vertauschte
+Sequenznummern, wechselnde Stream-Metadaten, Privacy-Header und fehlende
+Terminatoren werden abgelehnt. Ausgabe ist stets PCM-WAV mit einem Kanal,
+8000 Hz und 16 Bit. Telegram-, Opus- und Live-Audio-Anbindung gehören nicht zu
+diesem Stand.
+
 === Szenarioformat
 
 Eine UTF-8-Szenariodatei enthält einen Namen, die Funkgerät-ID und danach pro
@@ -252,11 +324,11 @@ keine vollständige SDS-Transaktion.
 
 == Routinghinweise und Grenzen
 
-Der Playground importiert keine PCAP-Dateien und erzeugt keine semantischen
-Sprachabläufe. Semantische SDS, Call Alert, Radio Check und der für `announce`
-benötigte CSBK sind implementiert; weitere Writer und Szenarien bleiben
-Gegenstand von Issue #15. Eine Vollbild-TUI bleibt eine mögliche Ausbaustufe von
-Issue #14.
+Der Playground importiert keine PCAP-Dateien. Semantische SDS, Call Alert,
+Radio Check, Sprache und der für `announce` benötigte CSBK sind implementiert.
+Eine Vollbild-TUI bleibt eine mögliche Ausbaustufe von Issue #14. Die
+Hardwareabnahme der Sprachsequenzen folgt nach dem Plan
+`docs/voice-codec-hardware-plan.adoc`.
 
 Der Master sendet Gruppenverkehr nicht an den Ursprungshotspot zurück. Zwei
 virtuelle Funkgeräte am selben Hotspot empfangen daher keine TG-SDS voneinander;

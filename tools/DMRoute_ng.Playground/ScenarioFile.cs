@@ -12,9 +12,12 @@ internal static class ScenarioFile
     private const int MaxPacketBytes = 4096;
 
     public static ScenarioLoadResult Load(string path, int targetRepeaterId)
+        => Load(path, (int?)targetRepeaterId);
+
+    public static ScenarioLoadResult Load(string path, int? targetRepeaterId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(targetRepeaterId);
+        if (targetRepeaterId <= 0) throw new ArgumentOutOfRangeException(nameof(targetRepeaterId));
         if (!File.Exists(path)) throw new ScenarioFormatException($"Szenariodatei nicht gefunden: {path}");
 
         string? name = null;
@@ -75,9 +78,9 @@ internal static class ScenarioFile
 
             if (!HomebrewProtocol.TryReadDmrdInfo(packet, out var info))
                 throw Error(lineNumber, "Der Schritt enthält kein vollständiges DMRD-Datagramm.");
-            if (info.RepeaterId != targetRepeaterId)
+            if (targetRepeaterId.HasValue && info.RepeaterId != targetRepeaterId.Value)
             {
-                BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(11, 4), targetRepeaterId);
+                BinaryPrimitives.WriteInt32BigEndian(packet.AsSpan(11, 4), targetRepeaterId.Value);
                 rewritten++;
             }
 

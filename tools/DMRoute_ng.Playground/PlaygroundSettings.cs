@@ -9,6 +9,7 @@ internal sealed record PlaygroundSettings
     public PlaygroundMasterSettings Master { get; init; } = new();
     public PlaygroundHotspotSettings[] Hotspots { get; init; } = [];
     public PlaygroundRadioSettings[] Radios { get; init; } = [];
+    public PlaygroundCodecSettings? Codec { get; init; } = new();
 
     public void Validate()
     {
@@ -83,6 +84,11 @@ internal sealed record PlaygroundSettings
         throw new PlaygroundConfigurationException(
             $"Der Master-Hostname '{Master.Host}' besitzt keine IPv4-Adresse.");
     }
+}
+
+internal sealed record PlaygroundCodecSettings
+{
+    public string? OpenDmrExecutable { get; init; }
 }
 
 internal sealed record PlaygroundRadioSettings
