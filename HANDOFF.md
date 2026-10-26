@@ -2,7 +2,7 @@
 
 ## Active work: OpenDMR-Sprachszenarien
 
-- Branch: `feat/opendmr-playground-voice`, gestapelt auf
+- Branch: `feat/opendmr-playground-voice`, Draft-PR #28, gestapelt auf
   `refactor/application-structure`/PR #27.
 - OpenDMR 1.0.0 ist unverändert unter `third_party/OpenDMR` auf Commit
   `d28164b39ba4d91ad5948ff22707937f8944f70f` festgelegt. Der Codec läuft als
@@ -358,8 +358,7 @@ Nebenläufigkeitsverträge im Code festhalten.
 
 ## Precise next step
 
-Die vollständige Release-Test- und Dokumentationsprüfung abschließen, den
-Feature-Branch committen und als gestapelten PR auf
-`refactor/application-structure` öffnen. Issue #15 danach um Implementierung,
-PR und die weiterhin offenen Hardwarefälle `VC03` bis `VC09` ergänzen, ohne es
-manuell zu schließen.
+Die CI-Prüfungen und das Review von Draft-PR #28 abwarten. Nach dem Merge der
+gestapelten Basis #27 den PR auf den dann aktuellen Zielbranch umstellen. Issue
+#15 ist um Implementierung, PR und die weiterhin offenen Hardwarefälle `VC03`
+bis `VC09` ergänzt und bleibt bis zu deren Durchführung geöffnet.
