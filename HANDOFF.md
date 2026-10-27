@@ -1,5 +1,48 @@
 # DMRoute-ng handoff
 
+## Active work: Nix-Flake für Entwicklung und Release
+
+- Branch: `feat/nix-flake-release`, gestapelt auf
+  `feat/blip25-voice-encoder`/Draft-PR #29.
+- `flake.lock` pinnt nixpkgs auf Commit
+  `d3b13ad75cc492690728f9307e443dec9ef9a20e` vom 24. Oktober 2026.
+  `nix/server-deps.json` enthält die externen NuGet-Versionen und -Hashes. Die
+  Linux-x64-Runtimepacks kommen aus dem gepinnten .NET-SDK; der Playground hat
+  keine weiteren NuGet-Abhängigkeiten. Der Rust-Encoder verwendet weiterhin
+  seine eigene `Cargo.lock`.
+- Die Flake bietet auf Apple Silicon und Linux `openDmr`, `documentation`,
+  `blip25-encoder` und eine Dev-Shell. `server`, `playground` und
+  `releaseBundle` sind bewusst nur auf `x86_64-linux` sichtbar.
+- `releaseBundle` behält die öffentlichen Artefaktnamen bei: Serververzeichnis,
+  Playground-Tarball mit OpenDMR-Quellen und Hinweisen sowie beide PDF-Bücher.
+  Der experimentelle blip25-Encoder bleibt bis VC10 außerhalb des Bundles.
+- Der Release-Workflow baut das Linux-Bundle mit Nix und veröffentlicht alle
+  Linux-/Doku-Dateien in einem Job. Windows x64 bleibt beim bisherigen
+  NativeAOT-Publish. Der Cleanup wartet auf beide Plattformjobs.
+- Der Testworkflow baut `releaseBundle` auf Linux. Dadurch kann ein Release nur
+  nach einem erfolgreichen reproduzierbaren Linux-Build ausgelöst werden.
+- Lokale Validierung: `nix flake check --all-systems --no-build` evaluiert alle
+  Linux- und macOS-Ausgaben. `nix flake check` baut auf Apple Silicon OpenDMR
+  samt Regressionstest, beide Dokumentationsbücher und den Rust-Encoder mit
+  2/2 Unit-Tests. Linux NativeAOT kann auf diesem Apple-Silicon-Host nicht
+  ausgeführt werden und wird durch den neuen GitHub-Job geprüft.
+- Der erste Linux-Lauf zeigte doppelte Runtimepacks, weil der erzeugte
+  NuGet-Stand dieselben Pakete wie das gepinnte Nix-.NET-SDK enthielt. Die drei
+  Runtimeeinträge wurden aus beiden NuGet-Dateien entfernt; das SDK liefert sie
+  bereits mit identischem Hash.
+- Der zweite Linux-Lauf baute Server-NativeAOT, Playground, OpenDMR und beide
+  Bücher erfolgreich. Nur das Bundle scheiterte, weil `cp -a` den
+  schreibgeschützten Modus des Playground-Store-Verzeichnisses übernahm. Das
+  neue Bundle macht ausschließlich seine eigene Kopie vor den Zusatzdateien
+  beschreibbar.
+- Der dritte PR-Lauf ist vollständig grün. `nix-release` baute das komplette
+  Linux-x64-Bundle einschließlich NativeAOT, Playground, OpenDMR-Test und PDFs
+  in 71 Sekunden; .NET-Tests, Rust-Encoder, Dokumentation und beide bisherigen
+  Playground-Matrizen bestanden ebenfalls.
+- Draft-PR #30 enthält den Endstand und schließt Issue #23 erst beim Merge.
+  Präziser nächster Schritt ist der Wechsel zurück auf
+  `feat/blip25-voice-encoder` und der verdeckte VC10-A/B-Vergleich auf TG 1.
+
 ## Active work: experimenteller blip25-Encoder
 
 - Branch: `feat/blip25-voice-encoder`, gestapelt auf

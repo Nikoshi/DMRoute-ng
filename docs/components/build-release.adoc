@@ -1,0 +1,105 @@
+= Reproduzierbare Builds und Releases
+:toc:
+
+== Geltungsbereich
+
+Die Datei `flake.nix` beschreibt die Entwicklungswerkzeuge und die
+Linux-x64-Releaseartefakte. `flake.lock` legt den verwendeten nixpkgs-Commit und
+dessen Quellhash fest. Die externen NuGet-Pakete des Servers sind mit Version
+und Hash unter `nix/` erfasst. Die .NET-Runtimepacks stammen aus dem über
+nixpkgs gesperrten SDK; der Playground benötigt darüber hinaus keine
+NuGet-Pakete. Cargo verwendet zusätzlich die eingecheckte `Cargo.lock` des
+experimentellen Sprachencoders.
+
+Der Windows-x64-Server wird weiterhin im GitHub-Workflow mit dem .NET-SDK und
+NativeAOT gebaut. Die Flake ersetzt diesen Plattformpfad nicht.
+
+== Entwicklungsumgebung
+
+Nix mit aktivierter Flake-Unterstützung stellt die benötigten Compiler und
+Werkzeuge bereit:
+
+[source,shell]
+----
+nix develop
+make test
+nix build .#documentation
+----
+
+Die Shell enthält .NET 9, C/C++-Compiler, GNU Make, Rust, Cargo,
+AsciiDoctor einschließlich PDF-Erweiterung, Git und `nixfmt`. Lokale
+Zugangsdaten, Playground-Profile, Audio- und Capture-Dateien sind nicht Teil des
+Flake-Quellbaums.
+
+== Pakete
+
+Folgende Pakete sind direkt adressierbar:
+
+[cols="1,3",options="header"]
+|===
+|Attribut |Inhalt
+
+|`openDmr`
+|OpenDMR `1.0.0+dmroute.2` einschließlich Regressionstest
+
+|`documentation`
+|Handbuch und Hardwaretestbuch als HTML und PDF
+
+|`blip25-encoder`
+|optionaler Rust-Encoder einschließlich Unit-Tests
+
+|`server`
+|Linux-x64-NativeAOT-Server
+
+|`playground`
+|selbstenthaltender Linux-x64-Single-File-Playground
+
+|`releaseBundle`
+|vollständige Linux-x64-Verzeichnisstruktur für den GitHub-Release
+|===
+
+`server`, `playground` und `releaseBundle` werden nur auf `x86_64-linux`
+angeboten. Die Entwicklungs-Shell sowie OpenDMR, Dokumentation und Rust-Encoder
+sind zusätzlich auf Apple Silicon verfügbar.
+
+[source,shell]
+----
+nix build .#openDmr
+nix build .#documentation
+nix build .#blip25-encoder
+nix build .#releaseBundle
+nix flake check
+----
+
+== Releaseaufbau
+
+`releaseBundle` erzeugt dieselben öffentlichen Namen wie der bisherige
+GitHub-Workflow:
+
+* `DMRoute-ng-linux-x64/` mit dem NativeAOT-Server;
+* `DMRoute-ng-playground-linux-x64.tar.gz` mit Playground, OpenDMR, Lizenz,
+  Credits und vollständigem OpenDMR-Quellarchiv;
+* `docs/DMRoute-ng-Handbuch.pdf`;
+* `docs/DMRoute-ng-Hardwaretests.pdf`.
+
+Der experimentelle `dmroute-blip25-encoder` ist ein eigenes Flake-Paket und
+bleibt bis zur Hardwareabnahme außerhalb des Releasebundles. Der Linux-Job des
+Release-Workflows lädt die Dateien aus `releaseBundle` hoch. Der Windows-Job
+liefert weiterhin `DMRoute-ng-win-x64`; danach entfernt ein gemeinsamer
+Aufräumjob ältere CI-Releases.
+
+== Aktualisierung gesperrter Abhängigkeiten
+
+Ein Update von nixpkgs erfolgt bewusst mit anschließender vollständiger
+Validierung:
+
+[source,shell]
+----
+nix flake update
+nix flake check
+----
+
+Ändern sich .NET-Paketverweise oder Runtimepacks, werden die
+`buildDotnetModule`-Fetcher für `server` und `playground` ausgeführt und die
+erzeugten JSON-Dateien unter `nix/` geprüft. Ein Release darf erst nach einem
+erfolgreichen Linux-Build von `releaseBundle` erstellt werden.

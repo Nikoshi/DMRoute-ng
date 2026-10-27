@@ -18,7 +18,7 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Resolver, Blind-Probe, WHOIS und Offline-Fallback umgesetzt; Ein-Master-Hardwarelauf teilweise bestanden | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
 | 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit SDS und Control-Transaktionen umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
-| 9 | [#23 Nix Flake](https://github.com/Nikoshi/DMRoute-ng/issues/23) | Release-Flake für Linux wird getrennt umgesetzt | Encoder-PR als gestapelte Basis |
+| 9 | [#23 Nix Flake](https://github.com/Nikoshi/DMRoute-ng/issues/23) | Flake, Dev-Shell und Linux-Releasebundle umgesetzt; Linux-CI-Abnahme offen | gestapelt auf Encoder-PR #29 |
 | 10 | [#17 Virtuelles und echtes Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Hardware-/RF-Konzept offen | #15 |
 
 ## Gerätekompatibilität AnyTone und RT3S
@@ -198,7 +198,12 @@ Dokumentation und den optionalen Rust-Encoder reproduzierbar bauen. Sie stellt
 außerdem eine Entwicklungsumgebung und Checks bereit. Der bestehende
 Windows-NativeAOT-Pfad bleibt im GitHub-Workflow erhalten. Release-Dateinamen
 und GitHub-Release-Ablauf bleiben kompatibel; der Linux-Job konsumiert künftig
-das von Nix erzeugte Bundle. Die Umsetzung folgt als eigener gestapelter PR.
+das von Nix erzeugte Bundle. `flake.lock`, externe NuGet-Hashes und
+Cargo-Lockdatei sperren die Quellen; .NET-Runtimepacks kommen aus dem gepinnten
+SDK. OpenDMR, Dokumentation und Rust-Encoder wurden
+auf Apple Silicon aus der Flake gebaut und geprüft. Der vollständige
+Linux-NativeAOT-Build läuft als eigener CI-Job des gestapelten PRs; Windows
+bleibt beim bisherigen .NET-Publish.
 
 ## 10. Virtuelles und echtes Funkgerät (#17)
 

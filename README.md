@@ -58,6 +58,13 @@ Die jeweils aktuelle Release-Version ist zusätzlich als PDF verfügbar:
 
 ## Entwicklung
 
+Die reproduzierbare Entwicklungsumgebung wird mit Nix geladen. Sie enthält
+.NET, C/C++, Rust und die Dokumentationswerkzeuge:
+
+```console
+nix develop
+```
+
 Build und Tests laufen standardmäßig in Release-Konfiguration:
 
 ```console
@@ -74,6 +81,17 @@ make docs
 
 Die erzeugten HTML- und PDF-Dateien liegen anschließend unter
 `artifacts/docs/` und werden nicht eingecheckt.
+
+Der Linux-x64-Release wird vollständig aus der gesperrten Flake erzeugt:
+
+```console
+nix build .#releaseBundle
+```
+
+Auf Apple Silicon stehen Entwicklungs-Shell, OpenDMR, Dokumentation und der
+optionale Rust-Encoder bereit. Server, Playground und Releasebundle sind auf
+Linux x64 begrenzt. Aufbau und Pflege beschreibt die
+[Build- und Release-Dokumentation](docs/components/build-release.adoc).
 
 ## Emulator-Playground
 
