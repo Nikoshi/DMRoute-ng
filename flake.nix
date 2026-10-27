@@ -128,24 +128,25 @@
                 ];
               }
               ''
-                mkdir -p "$out/DMRoute-ng-linux-x64"
-                cp -a ${server}/lib/dmroute-ng/. "$out/DMRoute-ng-linux-x64/"
+                    mkdir -p "$out/DMRoute-ng-linux-x64"
+                    cp -a ${server}/lib/dmroute-ng/. "$out/DMRoute-ng-linux-x64/"
 
                 mkdir -p "$out/DMRoute-ng-playground-linux-x64"
                 cp -a ${playground}/lib/dmroute-ng-playground/. "$out/DMRoute-ng-playground-linux-x64/"
+                chmod -R u+w "$out/DMRoute-ng-playground-linux-x64"
                 cp ${openDmr}/bin/dmr_codec "$out/DMRoute-ng-playground-linux-x64/"
-                cp ${./THIRD-PARTY-NOTICES.md} "$out/DMRoute-ng-playground-linux-x64/"
-                cp ${./third_party/OpenDMR/LICENSE} "$out/DMRoute-ng-playground-linux-x64/OpenDMR-LICENSE"
-                cp ${./third_party/OpenDMR/decoder/CREDITS} "$out/DMRoute-ng-playground-linux-x64/OpenDMR-decoder-CREDITS"
-                cp ${./third_party/OpenDMR/encoder/CREDITS} "$out/DMRoute-ng-playground-linux-x64/OpenDMR-encoder-CREDITS"
-                tar -czf "$out/DMRoute-ng-playground-linux-x64/OpenDMR-1.0.0+dmroute.2-source.tar.gz" \
-                  -C ${./third_party} OpenDMR
-                tar -czf "$out/DMRoute-ng-playground-linux-x64.tar.gz" \
-                  -C "$out" DMRoute-ng-playground-linux-x64
+                    cp ${./THIRD-PARTY-NOTICES.md} "$out/DMRoute-ng-playground-linux-x64/"
+                    cp ${./third_party/OpenDMR/LICENSE} "$out/DMRoute-ng-playground-linux-x64/OpenDMR-LICENSE"
+                    cp ${./third_party/OpenDMR/decoder/CREDITS} "$out/DMRoute-ng-playground-linux-x64/OpenDMR-decoder-CREDITS"
+                    cp ${./third_party/OpenDMR/encoder/CREDITS} "$out/DMRoute-ng-playground-linux-x64/OpenDMR-encoder-CREDITS"
+                    tar -czf "$out/DMRoute-ng-playground-linux-x64/OpenDMR-1.0.0+dmroute.2-source.tar.gz" \
+                      -C ${./third_party} OpenDMR
+                    tar -czf "$out/DMRoute-ng-playground-linux-x64.tar.gz" \
+                      -C "$out" DMRoute-ng-playground-linux-x64
 
-                mkdir -p "$out/docs"
-                cp ${documentation}/DMRoute-ng-Handbuch.pdf "$out/docs/"
-                cp ${documentation}/DMRoute-ng-Hardwaretests.pdf "$out/docs/"
+                    mkdir -p "$out/docs"
+                    cp ${documentation}/DMRoute-ng-Handbuch.pdf "$out/docs/"
+                    cp ${documentation}/DMRoute-ng-Hardwaretests.pdf "$out/docs/"
               '';
         in
         {

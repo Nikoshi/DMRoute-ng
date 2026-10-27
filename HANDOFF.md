@@ -30,6 +30,11 @@
   NuGet-Stand dieselben Pakete wie das gepinnte Nix-.NET-SDK enthielt. Die drei
   Runtimeeinträge wurden aus beiden NuGet-Dateien entfernt; das SDK liefert sie
   bereits mit identischem Hash.
+- Der zweite Linux-Lauf baute Server-NativeAOT, Playground, OpenDMR und beide
+  Bücher erfolgreich. Nur das Bundle scheiterte, weil `cp -a` den
+  schreibgeschützten Modus des Playground-Store-Verzeichnisses übernahm. Das
+  neue Bundle macht ausschließlich seine eigene Kopie vor den Zusatzdateien
+  beschreibbar.
 - Präziser nächster Schritt: Änderungen committen, Branch pushen, Issue #23
   konkretisieren und einen Draft-PR auf Basis von
   `feat/blip25-voice-encoder` erstellen. Danach dessen Linux-Job abwarten und
