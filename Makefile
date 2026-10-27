@@ -8,7 +8,7 @@ OPENDMR_BUILD_DIR ?= artifacts/opendmr
 
 include dotnet.mk
 
-.PHONY: docs docs-check docs-html docs-pdf opendmr-codec opendmr-test playground-codec blip25-encoder blip25-test
+.PHONY: docs docs-check docs-html docs-pdf opendmr-codec opendmr-test playground-codec blip25-encoder blip25-test nix-check nix-release
 
 opendmr-codec:
 	rm -rf $(OPENDMR_BUILD_DIR)
@@ -30,6 +30,12 @@ blip25-encoder:
 
 blip25-test:
 	cargo test --locked --release --manifest-path tools/dmroute-blip25-encoder/Cargo.toml
+
+nix-check:
+	nix flake check --print-build-logs
+
+nix-release:
+	nix build .#releaseBundle --print-build-logs
 
 docs: docs-html docs-pdf
 

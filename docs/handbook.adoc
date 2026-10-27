@@ -29,3 +29,5 @@ include::components/mesh-protocol.adoc[leveloffset=+1]
 include::components/hot-paths.adoc[leveloffset=+1]
 
 include::components/emulator.adoc[leveloffset=+1]
+
+include::components/build-release.adoc[leveloffset=+1]

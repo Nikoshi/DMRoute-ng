@@ -1,5 +1,35 @@
 # DMRoute-ng handoff
 
+## Active work: Nix-Flake für Entwicklung und Release
+
+- Branch: `feat/nix-flake-release`, gestapelt auf
+  `feat/blip25-voice-encoder`/Draft-PR #29.
+- `flake.lock` pinnt nixpkgs auf Commit
+  `d3b13ad75cc492690728f9307e443dec9ef9a20e` vom 24. Oktober 2026.
+  `nix/server-deps.json` und `nix/playground-deps.json` enthalten die
+  Linux-x64-NuGet-Versionen und -Hashes; der Rust-Encoder verwendet weiterhin
+  seine eigene `Cargo.lock`.
+- Die Flake bietet auf Apple Silicon und Linux `openDmr`, `documentation`,
+  `blip25-encoder` und eine Dev-Shell. `server`, `playground` und
+  `releaseBundle` sind bewusst nur auf `x86_64-linux` sichtbar.
+- `releaseBundle` behält die öffentlichen Artefaktnamen bei: Serververzeichnis,
+  Playground-Tarball mit OpenDMR-Quellen und Hinweisen sowie beide PDF-Bücher.
+  Der experimentelle blip25-Encoder bleibt bis VC10 außerhalb des Bundles.
+- Der Release-Workflow baut das Linux-Bundle mit Nix und veröffentlicht alle
+  Linux-/Doku-Dateien in einem Job. Windows x64 bleibt beim bisherigen
+  NativeAOT-Publish. Der Cleanup wartet auf beide Plattformjobs.
+- Der Testworkflow baut `releaseBundle` auf Linux. Dadurch kann ein Release nur
+  nach einem erfolgreichen reproduzierbaren Linux-Build ausgelöst werden.
+- Lokale Validierung: `nix flake check --all-systems --no-build` evaluiert alle
+  Linux- und macOS-Ausgaben. `nix flake check` baut auf Apple Silicon OpenDMR
+  samt Regressionstest, beide Dokumentationsbücher und den Rust-Encoder mit
+  2/2 Unit-Tests. Linux NativeAOT kann auf diesem Apple-Silicon-Host nicht
+  ausgeführt werden und wird durch den neuen GitHub-Job geprüft.
+- Präziser nächster Schritt: Änderungen committen, Branch pushen, Issue #23
+  konkretisieren und einen Draft-PR auf Basis von
+  `feat/blip25-voice-encoder` erstellen. Danach dessen Linux-Job abwarten und
+  eventuelle Nix-Pfad- oder NativeAOT-Abweichungen direkt korrigieren.
+
 ## Active work: experimenteller blip25-Encoder
 
 - Branch: `feat/blip25-voice-encoder`, gestapelt auf

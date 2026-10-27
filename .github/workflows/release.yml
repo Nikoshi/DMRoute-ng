@@ -2,7 +2,7 @@ name: .NET Core Native Release
 
 on:
   workflow_run:
-    workflows: [ ".NET Core Test & Coverage" ] # Muss exakt dem 'name' der ersten Datei entsprechen
+    workflows: [ ".NET Core Test & Coverage" ]
     types:
       - completed
     branches:
@@ -10,96 +10,31 @@ on:
       - master
 
 jobs:
-  release:
-    # Triggert NUR, wenn der Test-Workflow ERFOLGREICH war
+  linux-release:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            runtime: linux-x64
-            artifact_name: DMRoute-ng-linux-x64
-          - os: windows-latest
-            runtime: win-x64
-            artifact_name: DMRoute-ng-win-x64
-
-    runs-on: ${{ matrix.os }}
-
-    permissions:
-      contents: write
-      packages: write
-    
-    steps:
-      # Da workflow_run im Kontext des Default-Branches startet, checken wir 
-      # hier explizit den exakten Commit aus, der den Test ausgelöst hat
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Set Short SHA
-        id: vars
-        shell: bash
-        run: echo "sha_short=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Setup .NET 11
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '11.x'
-
-      - name: Publish Highly Optimized Binary
-        shell: bash
-        run: |
-          dotnet publish src/DMRoute_ng/DMRoute-ng.csproj \
-            --configuration Release \
-            --runtime ${{ matrix.runtime }} \
-            --self-contained true \
-            -p:PublishAot=true \
-            -p:OptimizationPreference=Speed \
-            -p:IlcGenerateMsvcBindOptions=true \
-            --output ./publish/${{ matrix.artifact_name }}
-
-      - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ci-release-${{ steps.vars.outputs.sha_short }}
-          name: CI Release ${{ steps.vars.outputs.sha_short }}
-          draft: false
-          prerelease: false
-          files: ./publish/${{ matrix.artifact_name }}/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  documentation:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    needs: release
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout tested commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Set Short SHA
+      - name: Set short SHA
         id: vars
         shell: bash
         run: echo "sha_short=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v31
 
-      - name: Validate and build PDF documentation
-        run: make docs-pdf
+      - name: Build reproducible Linux release bundle
+        run: nix build .#releaseBundle --print-build-logs
 
-      - name: Add documentation to GitHub Release
+      - name: Add Linux programs and documentation to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ci-release-${{ steps.vars.outputs.sha_short }}
@@ -108,36 +43,28 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            artifacts/docs/DMRoute-ng-Handbuch.pdf
-            artifacts/docs/DMRoute-ng-Hardwaretests.pdf
+            result/DMRoute-ng-linux-x64/*
+            result/DMRoute-ng-playground-linux-x64.tar.gz
+            result/docs/DMRoute-ng-Handbuch.pdf
+            result/docs/DMRoute-ng-Hardwaretests.pdf
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete older releases
-        uses: dev-drprasad/delete-older-releases@v0.3.4
-        with:
-          keep_latest: 5
-          delete_tags: true
-          # Löscht NUR Tags, die exakt mit "ci-release-" starten (z.B. ci-release-dea3faf)
-          delete_tags_pattern: '^ci-release-.*'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  playground:
+  windows-release:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    needs: documentation
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     permissions:
       contents: write
+      packages: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout tested commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - name: Set Short SHA
+      - name: Set short SHA
         id: vars
         shell: bash
         run: echo "sha_short=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
@@ -147,26 +74,19 @@ jobs:
         with:
           dotnet-version: '11.x'
 
-      - name: Publish Playground and OpenDMR
+      - name: Publish NativeAOT binary
         shell: bash
         run: |
-          dotnet publish tools/DMRoute_ng.Playground/DMRoute_ng.Playground.csproj \
+          dotnet publish src/DMRoute_ng/DMRoute-ng.csproj \
             --configuration Release \
-            --runtime linux-x64 \
+            --runtime win-x64 \
             --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:DebugType=None \
-            --output ./publish/DMRoute-ng-playground-linux-x64
-          make opendmr-codec
-          cp artifacts/opendmr/dmr_codec ./publish/DMRoute-ng-playground-linux-x64/
-          cp THIRD-PARTY-NOTICES.md ./publish/DMRoute-ng-playground-linux-x64/
-          cp third_party/OpenDMR/LICENSE ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-LICENSE
-          cp third_party/OpenDMR/decoder/CREDITS ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-decoder-CREDITS
-          cp third_party/OpenDMR/encoder/CREDITS ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-encoder-CREDITS
-          tar -czf ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-1.0.0+dmroute.2-source.tar.gz -C third_party OpenDMR
-          tar -czf ./publish/DMRoute-ng-playground-linux-x64.tar.gz -C ./publish DMRoute-ng-playground-linux-x64
+            -p:PublishAot=true \
+            -p:OptimizationPreference=Speed \
+            -p:IlcGenerateMsvcBindOptions=true \
+            --output ./publish/DMRoute-ng-win-x64
 
-      - name: Add Playground to GitHub Release
+      - name: Add Windows program to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ci-release-${{ steps.vars.outputs.sha_short }}
@@ -174,6 +94,26 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: ./publish/DMRoute-ng-playground-linux-x64.tar.gz
+          files: ./publish/DMRoute-ng-win-x64/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    needs:
+      - linux-release
+      - windows-release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Delete older CI releases
+        uses: dev-drprasad/delete-older-releases@v0.3.4
+        with:
+          keep_latest: 5
+          delete_tags: true
+          delete_tags_pattern: '^ci-release-.*'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
