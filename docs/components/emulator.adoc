@@ -232,7 +232,7 @@ Gegenversuch vom virtuellen zum realen FuG sollte die virtuelle ID als digitaler
 Kontakt im Zielgerät hinterlegt sein; beim getesteten manuellen Dial wurde ohne
 diesen Kontakt zwar der Text angezeigt, aber kein Zustellbericht erzeugt.
 
-=== Sprachszenarien mit OpenDMR
+=== Sprachszenarien und Codec-Prozesse
 
 Der Sprachcodec läuft als eigener Prozess. Der Playground linkt keine
 OpenDMR-Bibliothek in die .NET-Anwendung und der Server lädt keinen Codec. Der
@@ -267,9 +267,46 @@ Die Suche nach dem Codec erfolgt in dieser Reihenfolge:
 Das Kommandozeilenargument hat Vorrang vor dem Profil. Die bisherigen
 Argumente `--setup`, `--config` und `--help` behalten ihre Bedeutung.
 
+Für vergleichende Encodertests kann das optionale Werkzeug
+`dmroute-blip25-encoder` getrennt gebaut werden:
+
+[source,shell]
+----
+make blip25-test
+make blip25-encoder
+----
+
+Es verwendet `blip25-vocoder` 1.0.0 und erzeugt dieselben kanonischen
+9-Byte-Codewörter wie die Playground-Schnittstelle. Der OpenDMR-Decoder wird
+dadurch nicht ersetzt. Das Backend ist experimentell und wird nicht im normalen
+Releasepaket verteilt. Herkunft, Reverse-Engineering-Angabe und Patenthinsweis
+stehen in `THIRD-PARTY-NOTICES.md`.
+
+Für `voice encode` gilt folgende Priorität:
+
+. `--voice-encoder <pfad>`;
+. das bestehende `--open-dmr <pfad>`;
+. `Codec:EncoderExecutable` im Playground-Profil;
+. `Codec:OpenDmrExecutable` im Playground-Profil;
+. OpenDMR neben dem Playground-Programm oder aus `PATH`.
+
+Damit bleiben vorhandene Aufrufe gültig. Explizite Kommandozeilenargumente
+haben weiterhin Vorrang. `voice decode` wertet `--voice-encoder` nicht aus und
+verwendet unverändert die OpenDMR-Reihenfolge.
+
+[source,json]
+----
+"Codec": {
+  "OpenDmrExecutable": "artifacts/opendmr/dmr_codec",
+  "EncoderExecutable": "tools/dmroute-blip25-encoder/target/release/dmroute-blip25-encoder"
+}
+----
+
 [source,shell]
 ----
 DMRoute-ng-playground --open-dmr ./dmr_codec voice info
+DMRoute-ng-playground --open-dmr ./dmr_codec --voice-encoder ./dmroute-blip25-encoder \
+  voice info
 DMRoute-ng-playground --config dmroute-playground.json --open-dmr ./dmr_codec \
   voice encode radio1 tg 9 ansage.wav ansage.dmrd
 DMRoute-ng-playground --config dmroute-playground.json --open-dmr ./dmr_codec \

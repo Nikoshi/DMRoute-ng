@@ -81,6 +81,13 @@ Privacy-Bit setzen.
 |Nach Reparatur des zweiten Hotspots je einen TG- und Privatruf über den Master
 routen.
 |Nur der vorgesehene Routingpfad sendet; Ursprung erhält kein Gruppenecho.
+
+|VC10
+|verdeckter Encodervergleich zu AnyTone und RT3S
+|Dieselbe PCM-Quelle mit OpenDMR und dem Referenzencoder kodieren. Drei
+verdeckte A/B-Paare je Gerät in vorab protokollierter Reihenfolge senden.
+|Referenzencoder wird in mindestens zwei von drei Paaren bevorzugt; Rufaufbau,
+Audioanfang, Audioende und Terminator zeigen keine Regression.
 |===
 
 == Aufzeichnung
@@ -91,8 +98,14 @@ dekodierte WAV-Datei und das hörbare Ergebnis notiert. Rohdateien mit lokalen
 IDs oder Sprache bleiben außerhalb des Repositorys; der Ergebnisbericht erhält
 nur sanitisierten Hexausschnitt, Prüfsummen und die beobachteten Unterschiede.
 
+Für VC10 legt eine zweite Person die Reihenfolge A/B vorab fest, ohne sie der
+hörenden Person mitzuteilen. Diese schreibt den verstandenen Inhalt auf und
+wählt je Paar A, B oder Gleichstand. Quelldatei, Szenarien und Sprachdaten
+bleiben außerhalb des Repositories; erfasst werden Hashwerte, Framezahlen,
+Reihenfolge und Ergebnis.
+
 == Reihenfolge
 
 VC01 und VC02 benötigen keine RF-Hardware. Danach folgen VC03 bis VC08 mit dem
-funktionierenden Hotspot. VC09 wird erst nach Reparatur des zweiten
-Antennenanschlusses durchgeführt.
+funktionierenden Hotspot. VC10 kann bereits mit einem RF-Endpunkt durchgeführt
+werden. VC09 folgt erst nach Reparatur des zweiten Antennenanschlusses.

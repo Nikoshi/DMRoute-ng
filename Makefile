@@ -8,7 +8,7 @@ OPENDMR_BUILD_DIR ?= artifacts/opendmr
 
 include dotnet.mk
 
-.PHONY: docs docs-check docs-html docs-pdf opendmr-codec opendmr-test playground-codec
+.PHONY: docs docs-check docs-html docs-pdf opendmr-codec opendmr-test playground-codec blip25-encoder blip25-test
 
 opendmr-codec:
 	rm -rf $(OPENDMR_BUILD_DIR)
@@ -24,6 +24,12 @@ test: opendmr-test
 
 playground-codec: opendmr-codec
 	dotnet run --project tools/DMRoute_ng.Playground/DMRoute_ng.Playground.csproj -c $(PROJECT_CONFIG) -- --open-dmr $(OPENDMR_BUILD_DIR)/dmr_codec $(PLAYGROUND_ARGS)
+
+blip25-encoder:
+	cargo build --locked --release --manifest-path tools/dmroute-blip25-encoder/Cargo.toml
+
+blip25-test:
+	cargo test --locked --release --manifest-path tools/dmroute-blip25-encoder/Cargo.toml
 
 docs: docs-html docs-pdf
 

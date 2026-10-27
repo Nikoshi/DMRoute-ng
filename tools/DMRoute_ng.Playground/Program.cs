@@ -108,8 +108,8 @@ internal static class PlaygroundApplication
         writer.WriteLine("Verwendung:");
         writer.WriteLine("  DMRoute-ng-playground --setup [--config <pfad>]");
         writer.WriteLine("  DMRoute-ng-playground [--config <pfad>]");
-        writer.WriteLine("  DMRoute-ng-playground [--config <pfad>] [--open-dmr <pfad>] voice info");
+        writer.WriteLine("  DMRoute-ng-playground [--config <pfad>] [--open-dmr <pfad>] [--voice-encoder <pfad>] voice info");
         writer.WriteLine("  DMRoute-ng-playground [--config <pfad>] [--open-dmr <pfad>] voice decode <eingabe.dmrd|eingabe.ambe> <ausgabe.wav>");
-        writer.WriteLine("  DMRoute-ng-playground --config <pfad> [--open-dmr <pfad>] voice encode <radio> <tg|fug> <ziel-id> <eingabe.wav> <ausgabe.dmrd>");
+        writer.WriteLine("  DMRoute-ng-playground --config <pfad> [--open-dmr <pfad>] [--voice-encoder <pfad>] voice encode <radio> <tg|fug> <ziel-id> <eingabe.wav> <ausgabe.dmrd>");
     }
 }

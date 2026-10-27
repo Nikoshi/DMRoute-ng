@@ -12,18 +12,23 @@ internal static class VoiceCommand
         if (arguments.Length < 2) throw Usage();
         PlaygroundSettings? settings = null;
         var isEncode = arguments[1].Equals("encode", StringComparison.OrdinalIgnoreCase);
-        if (isEncode || (startup.OpenDmrExecutable is null && File.Exists(startup.ConfigPath)))
+        if (isEncode || ((startup.OpenDmrExecutable is null || startup.VoiceEncoderExecutable is null) &&
+                         File.Exists(startup.ConfigPath)))
             settings = PlaygroundConfigurationFile.Load(startup.ConfigPath);
-        var executable = ResolveExecutable(startup.OpenDmrExecutable, settings?.Codec?.OpenDmrExecutable);
-        var codec = new OpenDmrProcessCodec(executable);
 
         switch (arguments[1].ToLowerInvariant())
         {
             case "info" when arguments.Length == 2:
-                Console.WriteLine(await codec.GetInfoAsync(cancellationToken).ConfigureAwait(false));
+            {
+                var decoder = CreateDecoder(startup, settings);
+                var encoder = CreateEncoder(startup, settings);
+                Console.WriteLine($"Decoder: {await decoder.GetInfoAsync(cancellationToken).ConfigureAwait(false)}");
+                Console.WriteLine($"Encoder: {await encoder.GetInfoAsync(cancellationToken).ConfigureAwait(false)}");
                 return 0;
+            }
             case "decode" when arguments.Length == 4:
             {
+                var codec = CreateDecoder(startup, settings);
                 var ambe = Path.GetExtension(arguments[2]).Equals(".ambe", StringComparison.OrdinalIgnoreCase)
                     ? await File.ReadAllBytesAsync(arguments[2], cancellationToken).ConfigureAwait(false)
                     : VoiceScenarioFile.ReadAmbe(arguments[2]);
@@ -36,6 +41,7 @@ internal static class VoiceCommand
             }
             case "encode" when arguments.Length == 7:
             {
+                var codec = CreateEncoder(startup, settings);
                 settings ??= PlaygroundConfigurationFile.Load(startup.ConfigPath);
                 var radio = settings.Radios.FirstOrDefault(r => r.Name.Equals(arguments[2], StringComparison.OrdinalIgnoreCase))
                     ?? throw new ArgumentException($"Unbekanntes Funkgerät '{arguments[2]}'.");
@@ -62,7 +68,7 @@ internal static class VoiceCommand
         }
     }
 
-    private static string ResolveExecutable(string? commandLine, string? configured)
+    internal static string ResolveDecoderExecutable(string? commandLine, string? configured)
     {
         if (!string.IsNullOrWhiteSpace(commandLine)) return commandLine;
         if (!string.IsNullOrWhiteSpace(configured)) return configured;
@@ -70,6 +76,32 @@ internal static class VoiceCommand
         var sibling = Path.Combine(AppContext.BaseDirectory, fileName);
         if (File.Exists(sibling)) return sibling;
         return fileName;
+    }
+
+    internal static string ResolveEncoderExecutable(
+        string? commandLineEncoder, string? commandLineOpenDmr,
+        string? configuredEncoder, string? configuredOpenDmr)
+    {
+        if (!string.IsNullOrWhiteSpace(commandLineEncoder)) return commandLineEncoder;
+        if (!string.IsNullOrWhiteSpace(commandLineOpenDmr)) return commandLineOpenDmr;
+        if (!string.IsNullOrWhiteSpace(configuredEncoder)) return configuredEncoder;
+        return ResolveDecoderExecutable(null, configuredOpenDmr);
+    }
+
+    private static OpenDmrProcessCodec CreateDecoder(
+        PlaygroundStartupArguments startup, PlaygroundSettings? settings) =>
+        new(ResolveDecoderExecutable(startup.OpenDmrExecutable, settings?.Codec?.OpenDmrExecutable));
+
+    private static OpenDmrProcessCodec CreateEncoder(
+        PlaygroundStartupArguments startup, PlaygroundSettings? settings)
+    {
+        var executable = ResolveEncoderExecutable(
+            startup.VoiceEncoderExecutable, startup.OpenDmrExecutable,
+            settings?.Codec?.EncoderExecutable, settings?.Codec?.OpenDmrExecutable);
+        var isExperimental = !string.IsNullOrWhiteSpace(startup.VoiceEncoderExecutable) ||
+                             (string.IsNullOrWhiteSpace(startup.OpenDmrExecutable) &&
+                              !string.IsNullOrWhiteSpace(settings?.Codec?.EncoderExecutable));
+        return new OpenDmrProcessCodec(executable, isExperimental ? "Sprachencoder" : "OpenDMR");
     }
 
     private static ArgumentException Usage() => new(

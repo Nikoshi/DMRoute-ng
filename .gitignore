@@ -39,6 +39,7 @@ Temporary Items
 # Standalone developer and test tools
 /tools/**/obj
 /tools/**/bin
+/tools/dmroute-blip25-encoder/target/
 
 # Generated documentation
 /artifacts/docs/
