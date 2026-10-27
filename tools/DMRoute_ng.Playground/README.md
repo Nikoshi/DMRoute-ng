@@ -44,6 +44,18 @@ DMRoute-ng-playground --open-dmr artifacts/opendmr/dmr_codec \
   voice decode ansage.dmrd kontrolle.wav
 ```
 
+Ein optionaler Encoder kann unabhängig vom OpenDMR-Decoder gewählt werden:
+
+```console
+make blip25-encoder
+DMRoute-ng-playground --open-dmr artifacts/opendmr/dmr_codec \
+  --voice-encoder tools/dmroute-blip25-encoder/target/release/dmroute-blip25-encoder \
+  voice encode radio1 tg 9 ansage.wav ansage.dmrd
+```
+
+`--voice-encoder` betrifft nur `voice encode`. Für `voice decode` bleibt
+OpenDMR zuständig.
+
 Die Eingabe ist einkanaliges PCM-WAV mit 8000 Hz und 16 Bit. Das erzeugte
 Szenario wird anschließend in der REPL mit `run <hotspot> ansage.dmrd`
 abgespielt. Nur vollständige unverschlüsselte Sprachrufe werden dekodiert.

@@ -89,6 +89,7 @@ internal sealed record PlaygroundSettings
 internal sealed record PlaygroundCodecSettings
 {
     public string? OpenDmrExecutable { get; init; }
+    public string? EncoderExecutable { get; init; }
 }
 
 internal sealed record PlaygroundRadioSettings

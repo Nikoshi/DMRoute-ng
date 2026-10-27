@@ -101,4 +101,6 @@ bereit. Das Linux-x64-Release enthält zusätzlich den getrennten OpenDMR-Codec
 und dessen vollständige GPL-Quellen. Damit wandelt der Playground WAV-Dateien
 in reproduzierbare DMRD-Sprachszenarien um und dekodiert unverschlüsselte
 Sprachszenarien wieder nach WAV. Build, Bedienung und Grenzen stehen ebenfalls
-in der Emulator-Dokumentation.
+in der Emulator-Dokumentation. Für Encodervergleiche kann im Quellbaum außerdem
+ein experimentelles, getrennt konfiguriertes `blip25-vocoder`-Backend gebaut
+werden. Es gehört derzeit nicht zum Releasepaket.

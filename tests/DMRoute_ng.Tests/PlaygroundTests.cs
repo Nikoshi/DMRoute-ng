@@ -23,6 +23,28 @@ public sealed class PlaygroundTests
     }
 
     [Fact]
+    public void VoiceEncoder_CommandLineTakesPriorityWithoutChangingOpenDmrFallback()
+    {
+        Assert.True(PlaygroundStartupArguments.TryParse(
+            ["--open-dmr", "decoder", "--voice-encoder", "encoder", "voice", "info"],
+            out var parsed, out var error));
+        Assert.Null(error);
+        Assert.Equal("decoder", parsed.OpenDmrExecutable);
+        Assert.Equal("encoder", parsed.VoiceEncoderExecutable);
+        Assert.Equal("encoder", VoiceCommand.ResolveEncoderExecutable(
+            parsed.VoiceEncoderExecutable, parsed.OpenDmrExecutable, "configured-encoder", "configured-opendmr"));
+        Assert.Equal("decoder", VoiceCommand.ResolveDecoderExecutable(
+            parsed.OpenDmrExecutable, "configured-opendmr"));
+
+        Assert.Equal("legacy-cli", VoiceCommand.ResolveEncoderExecutable(
+            null, "legacy-cli", "configured-encoder", "configured-opendmr"));
+        Assert.Equal("configured-encoder", VoiceCommand.ResolveEncoderExecutable(
+            null, null, "configured-encoder", "configured-opendmr"));
+        Assert.Equal("configured-opendmr", VoiceCommand.ResolveEncoderExecutable(
+            null, null, null, "configured-opendmr"));
+    }
+
+    [Fact]
     public void CommandTokenizer_PreservesQuotedScenarioPaths()
     {
         Assert.True(CommandLineTokenizer.TryTokenize(

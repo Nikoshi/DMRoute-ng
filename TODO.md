@@ -18,7 +18,7 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Resolver, Blind-Probe, WHOIS und Offline-Fallback umgesetzt; Ein-Master-Hardwarelauf teilweise bestanden | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
 | 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit SDS und Control-Transaktionen umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
-| 9 | [#23 Nix Flake](https://github.com/Nikoshi/DMRoute-ng/issues/23) | WIP-Issue ohne festgelegte Anforderungen | Konzept offen |
+| 9 | [#23 Nix Flake](https://github.com/Nikoshi/DMRoute-ng/issues/23) | Release-Flake für Linux wird getrennt umgesetzt | Encoder-PR als gestapelte Basis |
 | 10 | [#17 Virtuelles und echtes Funkgerät](https://github.com/Nikoshi/DMRoute-ng/issues/17) | Hardware-/RF-Konzept offen | #15 |
 
 ## Gerätekompatibilität AnyTone und RT3S
@@ -135,6 +135,12 @@ neu erzeugten Szenario zu wiederholenden Geräteprüfungen `VC03` bis `VC09` aus
 Live-Audio-Anbindung müssen Pitch-, Voice/Unvoiced- und Spektralanalyse des
 Encoders verbessert oder durch ein geeigneteres Backend ersetzt werden.
 
+Ein optionaler Rust-Prozess auf Basis von `blip25-vocoder` 1.0.0 ist als
+Referenzencoder umgesetzt. Das bestehende `--open-dmr` bleibt gültig;
+`--voice-encoder` und `Codec:EncoderExecutable` wählen nur für die Kodierung das
+neue Backend. OpenDMR bleibt Decoder. Vor einer Aufnahme in Releasepakete steht
+der verdeckte A/B-Hardwaretest `VC10` aus.
+
 Die dmroute.2-Wiederholung für `VC03` wurde am 27. Oktober dreimal vollständig
 an das AnyTone auf TG 1 gesendet. Anmeldung, Ping, alle 89 Szenarioschritte je
 Durchlauf und Abmeldung waren erfolgreich. Die Ansage war mit bekanntem Inhalt
@@ -187,9 +193,12 @@ Mehrwert bietet.
 
 ## 9. Nix Flake (#23)
 
-Das Issue ist derzeit leer und als WIP markiert. Umfang, unterstützte Systeme,
-Entwicklungsumgebung und Release-Bezug müssen vor einer Implementierung
-festgelegt werden.
+Die Flake soll die Linux-x64-Releases für Server, Playground, OpenDMR,
+Dokumentation und den optionalen Rust-Encoder reproduzierbar bauen. Sie stellt
+außerdem eine Entwicklungsumgebung und Checks bereit. Der bestehende
+Windows-NativeAOT-Pfad bleibt im GitHub-Workflow erhalten. Release-Dateinamen
+und GitHub-Release-Ablauf bleiben kompatibel; der Linux-Job konsumiert künftig
+das von Nix erzeugte Bundle. Die Umsetzung folgt als eigener gestapelter PR.
 
 ## 10. Virtuelles und echtes Funkgerät (#17)
 

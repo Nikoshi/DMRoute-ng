@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace DMRoute_ng.Audio;
 
 /// <summary>Führt den GPL-lizenzierten OpenDMR-Codec in einem getrennten Prozess aus.</summary>
-public sealed class OpenDmrProcessCodec(string executablePath)
+public sealed class OpenDmrProcessCodec(string executablePath, string processName = "OpenDMR")
 {
     public const int PcmSamplesPerFrame = 160;
     public const int AmbeBytesPerFrame = 9;
@@ -13,6 +13,11 @@ public sealed class OpenDmrProcessCodec(string executablePath)
         string.IsNullOrWhiteSpace(executablePath)
             ? throw new ArgumentException("Der OpenDMR-Pfad darf nicht leer sein.", nameof(executablePath))
             : executablePath;
+
+    public string ProcessName { get; } =
+        string.IsNullOrWhiteSpace(processName)
+            ? throw new ArgumentException("Der Prozessname darf nicht leer sein.", nameof(processName))
+            : processName;
 
     public Task<string> GetInfoAsync(CancellationToken cancellationToken = default) =>
         RunAsync(["info"], cancellationToken);
@@ -34,7 +39,7 @@ public sealed class OpenDmrProcessCodec(string executablePath)
 
         var bytes = await TransformAsync(ambe, false, cancellationToken).ConfigureAwait(false);
         if (bytes.Length != ambe.Length / AmbeBytesPerFrame * PcmSamplesPerFrame * sizeof(short))
-            throw new InvalidDataException("OpenDMR hat eine unerwartete PCM-Länge erzeugt.");
+            throw new InvalidDataException($"{ProcessName} hat eine unerwartete PCM-Länge erzeugt.");
         var samples = new short[bytes.Length / sizeof(short)];
         MemoryMarshal.Cast<byte, short>(bytes).CopyTo(samples);
         return samples;
@@ -61,7 +66,7 @@ public sealed class OpenDmrProcessCodec(string executablePath)
                 ? input.Length / PcmSamplesPerFrame * AmbeBytesPerFrame
                 : input.Length / AmbeBytesPerFrame * PcmSamplesPerFrame * sizeof(short);
             if (result.Length != expected)
-                throw new InvalidDataException($"OpenDMR hat {result.Length} statt {expected} Byte erzeugt.");
+                throw new InvalidDataException($"{ProcessName} hat {result.Length} statt {expected} Byte erzeugt.");
             return result;
         }
         finally
@@ -83,7 +88,7 @@ public sealed class OpenDmrProcessCodec(string executablePath)
             CreateNoWindow = true
         };
         foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("OpenDMR konnte nicht gestartet werden.");
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"{ProcessName} konnte nicht gestartet werden.");
         try
         {
             var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -92,7 +97,7 @@ public sealed class OpenDmrProcessCodec(string executablePath)
             var output = await outputTask.ConfigureAwait(false);
             var error = await errorTask.ConfigureAwait(false);
             if (process.ExitCode != 0)
-                throw new InvalidOperationException($"OpenDMR wurde mit Exit-Code {process.ExitCode} beendet: {error.Trim()}");
+                throw new InvalidOperationException($"{ProcessName} wurde mit Exit-Code {process.ExitCode} beendet: {error.Trim()}");
             return output.Trim();
         }
         catch (OperationCanceledException)

@@ -1,0 +1,15 @@
+[package]
+name = "dmroute-blip25-encoder"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+
+[dependencies]
+blip25-vocoder = { version = "=1.0.0", default-features = false, features = ["encode", "decode"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

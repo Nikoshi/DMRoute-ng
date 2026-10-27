@@ -1,5 +1,42 @@
 # DMRoute-ng handoff
 
+## Active work: experimenteller blip25-Encoder
+
+- Branch: `feat/blip25-voice-encoder`, gestapelt auf
+  `feat/opendmr-playground-voice`/Draft-PR #28.
+- `tools/dmroute-blip25-encoder` ist ein eigenständiges Rust-Programm mit den
+  Befehlen `info` und `encode`. Die Abhängigkeit `blip25-vocoder` ist per
+  `Cargo.lock` exakt auf 1.0.0 festgelegt. Das Programm packt
+  `C0(24)|C1(23)|C2(11)|C3(14)` als kanonisches 9-Byte-Codewort und gleicht die
+  interne Ein-Frame-Verzögerung aus, sodass N PCM-Frames genau N AMBE-Frames
+  ergeben.
+- Der Playground akzeptiert zusätzlich `--voice-encoder` und
+  `Codec:EncoderExecutable`. Die Encoderpriorität lautet: neues CLI-Argument,
+  bestehendes `--open-dmr`, neuer Profilwert, bestehender OpenDMR-Profilwert,
+  bisherige OpenDMR-Suche. Der Decoder verwendet unverändert ausschließlich
+  die OpenDMR-Reihenfolge. Bestehende Aufrufe bleiben gültig und explizite
+  Kommandozeilenargumente haben Vorrang.
+- `voice info` zeigt Decoder und Encoder getrennt. Der lokale, ignorierte
+  `dmroute-playground.json` verweist auf den Release-Build des Rust-Encoders und
+  auf OpenDMR als Decoder.
+- Lizenz- und Herkunftshinweise nennen ausdrücklich das Upstream-Reverse-
+  Engineering, Commit `d1762813b7142c021f4105c832bf7f060d1249fa`, MIT und den
+  Upstream-Patenthinsweis. DMRoute-ng behauptet keine Clean-Room-Entwicklung.
+  Der Encoder wird vorerst nicht in reguläre Releases aufgenommen.
+- `VC10` beschreibt drei verdeckte A/B-Paare je Gerät mit identischer Quelle.
+  Aufnahme in Releasepakete wird erst nach einer Präferenz in mindestens zwei
+  von drei Paaren ohne Regression der Rufrahmung bewertet.
+- Validierung: `make blip25-test` (2/2), `cargo clippy -D warnings`,
+  `make test` (OpenDMR und 137/137 .NET), `make docs`,
+  Playground-Rundlauf mit 252 AMBE-Frames und 40.320 dekodierten Samples sowie
+  NativeAOT-Publish des Servers für `osx-arm64`. Der Publish war erfolgreich;
+  NuGet-Vulnerability-Abfrage war in der Sandbox nicht erreichbar und der
+  macOS-Linker meldete die bekannte Abkündigung von `-ld_classic`.
+- Präziser nächster Schritt: Änderungen committen, Branch pushen und einen
+  Draft-PR mit Basis `feat/opendmr-playground-voice` erstellen. Danach einen
+  separaten Branch `feat/nix-flake-release` auf diesem Stand anlegen, Issue #23
+  konkretisieren und die Linux-Release-Erzeugung auf eine Flake umstellen.
+
 ## Active work: OpenDMR-Sprachszenarien
 
 - Branch: `feat/opendmr-playground-voice`, Draft-PR #28, gestapelt auf

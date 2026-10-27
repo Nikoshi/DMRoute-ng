@@ -1,7 +1,8 @@
 namespace DMRoute_ng.Playground;
 
 internal sealed record PlaygroundStartupArguments(
-    bool Setup, bool Help, string ConfigPath, string? OpenDmrExecutable, string[] Command)
+    bool Setup, bool Help, string ConfigPath, string? OpenDmrExecutable,
+    string? VoiceEncoderExecutable, string[] Command)
 {
     public static bool TryParse(string[] args, out PlaygroundStartupArguments parsed, out string? error)
     {
@@ -10,6 +11,7 @@ internal sealed record PlaygroundStartupArguments(
         var configPath = PlaygroundConfigurationFile.DefaultPath;
         var configSeen = false;
         string? openDmrExecutable = null;
+        string? voiceEncoderExecutable = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -57,10 +59,22 @@ internal sealed record PlaygroundStartupArguments(
                 continue;
             }
 
+            if (argument == "--voice-encoder")
+            {
+                if (voiceEncoderExecutable is not null || ++index >= args.Length || string.IsNullOrWhiteSpace(args[index]))
+                {
+                    parsed = Empty;
+                    error = "--voice-encoder benötigt genau einen Dateipfad.";
+                    return false;
+                }
+                voiceEncoderExecutable = args[index];
+                continue;
+            }
+
             if (argument.Equals("voice", StringComparison.OrdinalIgnoreCase))
             {
                 parsed = new PlaygroundStartupArguments(
-                    setup, help, configPath, openDmrExecutable, args[index..]);
+                    setup, help, configPath, openDmrExecutable, voiceEncoderExecutable, args[index..]);
                 error = null;
                 return true;
             }
@@ -70,11 +84,11 @@ internal sealed record PlaygroundStartupArguments(
             return false;
         }
 
-        parsed = new PlaygroundStartupArguments(setup, help, configPath, openDmrExecutable, []);
+        parsed = new PlaygroundStartupArguments(setup, help, configPath, openDmrExecutable, voiceEncoderExecutable, []);
         error = null;
         return true;
     }
 
     private static PlaygroundStartupArguments Empty { get; } =
-        new(false, false, PlaygroundConfigurationFile.DefaultPath, null, []);
+        new(false, false, PlaygroundConfigurationFile.DefaultPath, null, null, []);
 }
