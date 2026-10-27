@@ -198,8 +198,9 @@ Dokumentation und den optionalen Rust-Encoder reproduzierbar bauen. Sie stellt
 außerdem eine Entwicklungsumgebung und Checks bereit. Der bestehende
 Windows-NativeAOT-Pfad bleibt im GitHub-Workflow erhalten. Release-Dateinamen
 und GitHub-Release-Ablauf bleiben kompatibel; der Linux-Job konsumiert künftig
-das von Nix erzeugte Bundle. `flake.lock`, NuGet-Hashes und Cargo-Lockdatei
-sperren die externen Quellen. OpenDMR, Dokumentation und Rust-Encoder wurden
+das von Nix erzeugte Bundle. `flake.lock`, externe NuGet-Hashes und
+Cargo-Lockdatei sperren die Quellen; .NET-Runtimepacks kommen aus dem gepinnten
+SDK. OpenDMR, Dokumentation und Rust-Encoder wurden
 auf Apple Silicon aus der Flake gebaut und geprüft. Der vollständige
 Linux-NativeAOT-Build läuft als eigener CI-Job des gestapelten PRs; Windows
 bleibt beim bisherigen .NET-Publish.

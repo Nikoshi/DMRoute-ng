@@ -5,9 +5,11 @@
 
 Die Datei `flake.nix` beschreibt die Entwicklungswerkzeuge und die
 Linux-x64-Releaseartefakte. `flake.lock` legt den verwendeten nixpkgs-Commit und
-dessen Quellhash fest. NuGet-Pakete des Servers und Playgrounds sind mit Version
-und Hash unter `nix/` erfasst. Cargo verwendet zusätzlich die eingecheckte
-`Cargo.lock` des experimentellen Sprachencoders.
+dessen Quellhash fest. Die externen NuGet-Pakete des Servers sind mit Version
+und Hash unter `nix/` erfasst. Die .NET-Runtimepacks stammen aus dem über
+nixpkgs gesperrten SDK; der Playground benötigt darüber hinaus keine
+NuGet-Pakete. Cargo verwendet zusätzlich die eingecheckte `Cargo.lock` des
+experimentellen Sprachencoders.
 
 Der Windows-x64-Server wird weiterhin im GitHub-Workflow mit dem .NET-SDK und
 NativeAOT gebaut. Die Flake ersetzt diesen Plattformpfad nicht.

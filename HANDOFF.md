@@ -6,8 +6,9 @@
   `feat/blip25-voice-encoder`/Draft-PR #29.
 - `flake.lock` pinnt nixpkgs auf Commit
   `d3b13ad75cc492690728f9307e443dec9ef9a20e` vom 24. Oktober 2026.
-  `nix/server-deps.json` und `nix/playground-deps.json` enthalten die
-  Linux-x64-NuGet-Versionen und -Hashes; der Rust-Encoder verwendet weiterhin
+  `nix/server-deps.json` enthält die externen NuGet-Versionen und -Hashes. Die
+  Linux-x64-Runtimepacks kommen aus dem gepinnten .NET-SDK; der Playground hat
+  keine weiteren NuGet-Abhängigkeiten. Der Rust-Encoder verwendet weiterhin
   seine eigene `Cargo.lock`.
 - Die Flake bietet auf Apple Silicon und Linux `openDmr`, `documentation`,
   `blip25-encoder` und eine Dev-Shell. `server`, `playground` und
@@ -25,6 +26,10 @@
   samt Regressionstest, beide Dokumentationsbücher und den Rust-Encoder mit
   2/2 Unit-Tests. Linux NativeAOT kann auf diesem Apple-Silicon-Host nicht
   ausgeführt werden und wird durch den neuen GitHub-Job geprüft.
+- Der erste Linux-Lauf zeigte doppelte Runtimepacks, weil der erzeugte
+  NuGet-Stand dieselben Pakete wie das gepinnte Nix-.NET-SDK enthielt. Die drei
+  Runtimeeinträge wurden aus beiden NuGet-Dateien entfernt; das SDK liefert sie
+  bereits mit identischem Hash.
 - Präziser nächster Schritt: Änderungen committen, Branch pushen, Issue #23
   konkretisieren und einen Draft-PR auf Basis von
   `feat/blip25-voice-encoder` erstellen. Danach dessen Linux-Job abwarten und
