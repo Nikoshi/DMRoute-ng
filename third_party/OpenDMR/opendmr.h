@@ -141,12 +141,14 @@ bool opendmr_encode(opendmr_encoder_t *enc,
 void opendmr_encoder_reset(opendmr_encoder_t *enc);
 
 /**
- * Set encoder gain adjustment in dB.
+ * Set the encoder level relative to the calibrated DMR default.
  *
  * @param enc       Encoder instance.
  * @param gain_db   Gain adjustment (-20 to +20 dB, default 0).
  *
- * Positive values increase output level, negative values decrease.
+ * Positive values increase the encoded level, negative values decrease it.
+ * The value is converted to the logarithmic offset used by the AMBE
+ * quantizer; it is not a linear PCM multiplier.
  */
 void opendmr_encoder_set_gain(opendmr_encoder_t *enc, int gain_db);
 

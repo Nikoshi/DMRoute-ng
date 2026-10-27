@@ -112,7 +112,7 @@ bool opendmr_encode(opendmr_encoder_t *enc,
                     const int16_t pcm[160],
                     uint8_t ambe[9]);
 
-// Set gain adjustment (-20 to +20 dB, default 0)
+// Set level relative to the calibrated DMR default (-20 to +20 dB, default 0)
 void opendmr_encoder_set_gain(opendmr_encoder_t *enc, int gain_db);
 
 // Reset encoder state (call at start of new transmission)

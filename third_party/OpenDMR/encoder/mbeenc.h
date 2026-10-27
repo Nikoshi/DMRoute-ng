@@ -25,8 +25,9 @@ public:
 	~MBEEncoder();
 
 	/**
-	 * Set gain adjustment factor.
-	 * @param gain_adjust Linear gain multiplier (1.0 = no change)
+	 * Set the logarithmic gain offset used by the AMBE quantizer.
+	 * One unit corresponds to approximately 6.02 dB. Higher values reduce
+	 * the encoded level because the offset is subtracted during quantization.
 	 */
 	void set_gain_adjust(const float gain_adjust) { d_gain_adjust = gain_adjust; }
 

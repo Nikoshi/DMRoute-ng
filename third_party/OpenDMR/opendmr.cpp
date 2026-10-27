@@ -28,7 +28,7 @@ extern "C" {
 #define OPENDMR_VERSION_MINOR   0
 #define OPENDMR_VERSION_PATCH   0
 
-static const char *version_string = "1.0.0+dmroute.1";
+static const char *version_string = "1.0.0+dmroute.2";
 
 /*
  * ============================================================================
@@ -38,6 +38,15 @@ static const char *version_string = "1.0.0+dmroute.1";
 
 /* Golay FEC processing */
 #include "cgolay24128.h"
+
+/* OP25 calibrates its DMR transmit path with this logarithmic offset. */
+static constexpr float DMR_GAIN_ADJUST = 3.0f;
+static constexpr float DB_PER_LOG2_AMPLITUDE = 6.020599913f;
+
+static float gain_db_to_adjust(int gain_db)
+{
+    return DMR_GAIN_ADJUST - static_cast<float>(gain_db) / DB_PER_LOG2_AMPLITUDE;
+}
 
 /*
  * ============================================================================
@@ -215,8 +224,8 @@ opendmr_encoder_t *opendmr_encoder_create(void)
             return nullptr;
         }
         enc->enc->set_dmr_mode();   /* AMBE+2 mode */
-        enc->enc->set_gain_adjust(1.0f);
         enc->gain_db = 0;
+        enc->enc->set_gain_adjust(gain_db_to_adjust(enc->gain_db));
     }
     return enc;
 }
@@ -240,7 +249,7 @@ void opendmr_encoder_reset(opendmr_encoder_t *enc)
             return;
         }
         enc->enc->set_dmr_mode();
-        enc->enc->set_gain_adjust(powf(10.0f, enc->gain_db / 20.0f));
+        enc->enc->set_gain_adjust(gain_db_to_adjust(enc->gain_db));
     }
 }
 
@@ -251,7 +260,7 @@ void opendmr_encoder_set_gain(opendmr_encoder_t *enc, int gain_db)
         if (gain_db < -20) gain_db = -20;
         if (gain_db > 20) gain_db = 20;
         enc->gain_db = gain_db;
-        enc->enc->set_gain_adjust(powf(10.0f, gain_db / 20.0f));
+        enc->enc->set_gain_adjust(gain_db_to_adjust(gain_db));
     }
 }
 

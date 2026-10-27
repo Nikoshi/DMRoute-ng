@@ -6,11 +6,16 @@
   `refactor/application-structure`/PR #27.
 - OpenDMR basiert auf Version 1.0.0 und Commit
   `d28164b39ba4d91ad5948ff22707937f8944f70f`. DMRoute-ng kennzeichnet die
-  lokale Encoderkorrektur als `1.0.0+dmroute.1`. Der Codec läuft als eigener
+  lokalen Encoderkorrekturen als `1.0.0+dmroute.2`. Der Codec läuft als eigener
   Prozess; der Produktionsserver referenziert `DMRoute_ng.Audio` nicht.
 - Der Upstream-Wrapper hatte die neun quantisierten Encoderparameter linear
   angeordnet. `MBEEncoder` liefert nun die bereits im OP25-Code definierte
   49-Bit-Kanalzuordnung direkt an die kanonische AMBE-Fehlerkorrektur.
+- Der DMR-Wrapper verwendet nun wie der OP25-Sendepfad den logarithmischen
+  Gain-Offset `3.0`. Erzeugung und Reset verwenden denselben Wert; die
+  öffentliche dB-API rechnet relative Pegeländerungen in den Log2-Offset um.
+  Die V/UV-Suche bildet die Drei-Harmonischen-Bänder des Analysators explizit
+  auf die AMBE-Tabelle ab.
 - `voice encode` erzeugt aus 8-kHz-Mono-PCM-WAV ein reproduzierbares
   `.dmrd`-Szenario für Gruppen- oder Privatrufe. `voice decode` verarbeitet
   rohe AMBE-Dateien oder einen vollständigen unverschlüsselten DMRD-Ruf.
@@ -24,21 +29,24 @@
   einen festen kanonischen AMBE-Frame. Linux-x64-Test- und Releasepakete
   enthalten Codec, Lizenz, Credits und vollständiges Quellarchiv; Windows
   bleibt ohne Codec nutzbar.
-- Der erste RT3S-Lauf öffnete den Lautsprecher, blieb mit den fehlerhaft
-  angeordneten AMBE-Frames aber unverständlich. Dieselbe Störung trat im
-  lokalen Rundlauf auf. Mit der korrigierten Zuordnung ist die Kontroll-WAV
-  verständlich. `VC04` muss mit einem neu erzeugten Szenario wiederholt werden;
-  der Befund steht in `docs/hardware-test-results-2026-10-26-voice.adoc`.
-- Lokale Prüfung: OpenDMR baut auf macOS ARM64, meldet
-  `1.0.0+dmroute.1` und besteht den neuen nativen Encoder-Regressionsvektor.
-  `make test` besteht mit 136/136 .NET-Tests, `make docs` ohne Warnung. Der
-  Playground kodiert und dekodiert die 4,12-sekündige Testansage als 207
-  AMBE-Frames. Der NativeAOT-Smoke-Publish des Servers für `osx-arm64` ist
-  erfolgreich; `ld` meldet lediglich die bestehende Abkündigung von
-  `-ld_classic`.
-- Nächster Schritt: `ansage.dmrd` mit dem korrigierten Codec neu erzeugen und
-  `VC03`/`VC04` mit AnyTone und RT3S wiederholen. Die lokale ungetrackte
-  `ansage.dmrd` enthält weiterhin die vor der Korrektur erzeugten AMBE-Frames.
+- Ein TG-1-Lauf mit dmroute.1 öffnete AnyTone und RT3S, blieb auf beiden
+  Geräten aber schwer verständlich; im Wesentlichen war nur „Sprechgruppe 1“
+  erkennbar. Der lokale Rundlauf klang vergleichbar. Gain 3 verbessert eine
+  langsamere Kontrollansage, einzelne Laute bleiben jedoch verschluckt. Ein
+  zusätzlicher 3,4-kHz-Filter war leicht schlechter und wird nicht verwendet.
+  Der aktualisierte Befund steht in
+  `docs/hardware-test-results-2026-10-26-voice.adoc`.
+- Die nativen Regressionstests prüfen nun Stille, ein warmgelaufenes
+  synthetisches Sprachsignal, Reset, explizite 0 dB und unterschiedliche
+  Gainwerte. `make test` besteht mit den nativen Tests und 136/136 .NET-Tests;
+  `make docs` läuft ohne Warnung durch. Der Playground-Rundlauf mit
+  `ansage-tg1.wav` erzeugt unter dmroute.2 252 AMBE-Frames und dekodiert sie zu
+  40.320 PCM-Samples. Der NativeAOT-Publish des Servers für `osx-arm64` ist
+  erfolgreich; `ld` meldet nur die bekannte Abkündigung von `-ld_classic`.
+- Nächster Schritt: PR #28 aktualisieren und später `VC03`/`VC04` mit einem
+  durch dmroute.2 neu erzeugten Szenario auf AnyTone und RT3S wiederholen. Die
+  vier lokalen ungetrackten WAV-/DMRD-Dateien bleiben unverändert und werden
+  nicht committed.
 
 ## Basis: gestapelter Struktur- und Dokumentations-PR
 

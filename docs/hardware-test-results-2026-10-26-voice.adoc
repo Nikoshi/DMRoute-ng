@@ -1,4 +1,4 @@
-= Hardwareergebnis OpenDMR-Sprache vom 26. Oktober 2026
+= Hardwareergebnis OpenDMR-Sprache vom 26. und 27. Oktober 2026
 :toc:
 :sectnums:
 
@@ -20,16 +20,21 @@ der Codec-Rundlauf getrennt von der Funkstrecke geprüft.
 
 |Codec
 |OpenDMR 1.0.0 aus Commit
-`d28164b39ba4d91ad5948ff22707937f8944f70f`
+`d28164b39ba4d91ad5948ff22707937f8944f70f` mit lokalen DMRoute-ng-Patches
 
 |Eingabe
-|4,12 Sekunden PCM-WAV, mono, 8000 Hz, 16 Bit Little Endian
+|PCM-WAV, mono, 8000 Hz, 16 Bit Little Endian; anschließend eine langsamer
+gesprochene synthetische Kontrollansage
 
 |Funkweg
-|DMRoute-ng-Playground über einen MMDVM-Hotspot zum Retevis RT3S
+|DMRoute-ng-Playground über einen MMDVM-Hotspot auf TG 1, Zeitschlitz 2 und
+Color Code 1
+
+|Empfänger
+|Retevis RT3S und AnyTone
 |===
 
-== Beobachtung
+== Erste Fehleranalyse
 
 Der ursprüngliche Codec erzeugte 207 AMBE-Frames. Das erneute Extrahieren aus
 dem DMRD-Szenario und Dekodieren ergab 4,14 Sekunden Audio ohne korrigierte
@@ -39,17 +44,55 @@ nicht im Funkweg.
 
 Der Encoder hängte die neun quantisierten Sprachparameter linear zu 49 Bit
 zusammen. Die im enthaltenen OP25-Code definierte AMBE-Kanalzuordnung verteilt
-mehrere niederwertige Bits dagegen auf spätere Kanalblöcke. Nach Verwendung
-dieser Zuordnung war der lokale WAV-AMBE-WAV-Rundlauf verständlich und klang
-wie übliche DMR-Sprache.
+mehrere niederwertige Bits dagegen auf spätere Kanalblöcke. Die lokale Fassung
+`1.0.0+dmroute.1` korrigierte diese Zuordnung.
+
+== Gerätevergleich mit dmroute.1
+
+Ein neu erzeugter Gruppenruf von DMR-ID 10010 an TG 1 bestand aus 89
+Sprachbursts. Anmeldung, Ping, Szenarioablauf und Abmeldung des virtuellen
+Hotspots waren erfolgreich. Sowohl das AnyTone als auch das RT3S öffneten den
+Ruf und gaben denselben Inhalt wieder.
+
+Die Ansage blieb auf beiden Geräten schwer verständlich. Erkennbar war im
+Wesentlichen nur „Sprechgruppe 1“, auch dies erst aus dem Zusammenhang. Da die
+lokal wieder dekodierte Kontroll-WAV vergleichbar schlecht klang, wurde kein
+gerätespezifischer Unterschied festgestellt.
+
+== Encoderabgleich
+
+Der Vergleich mit dem OP25-DMR-Sendepfad ergab zwei Abweichungen:
+
+* OP25 wertet die Voice/Unvoiced-Entscheidung über Bänder zu je drei Harmonischen
+  aus. Der OpenDMR-Analysator setzt innerhalb eines solchen Bandes zwar stets
+  denselben Wert, die Zuordnung wird zur eindeutigen Abbildung trotzdem
+  übernommen.
+* OP25 verwendet für DMR den logarithmischen Encoderwert `gain_adjust = 3.0`.
+  OpenDMR verwendete `1.0` und behandelte die öffentliche dB-Angabe irrtümlich
+  wie einen linearen Faktor.
+
+Eine langsamer gesprochene lokale Kontrollansage war mit Gain 3 besser
+verständlich. Einzelne Laute wirkten weiterhin verschluckt; die Qualität blieb
+unter der eines Funkgeräte-Encoders. Eine zusätzliche Begrenzung des
+Eingangssignals auf ungefähr 3,4 kHz brachte keine Verbesserung und klang
+leicht schlechter. Sie wird daher nicht in den Audiopfad aufgenommen.
+
+Die Korrekturen werden als OpenDMR `1.0.0+dmroute.2` geführt. Die lokale
+Kontrollansage wurde damit geprüft; ein erneuter Funkversuch mit dieser Version
+steht noch aus.
 
 == Bewertung
 
-`VC01` ist mit der korrigierten Zuordnung lokal bestanden. Der erste Lauf von
-`VC04` belegt nur, dass das RT3S den Ruf öffnet; wegen der fehlerhaft erzeugten
-AMBE-Frames gilt die Sprachprüfung nicht als bestanden.
+Die strukturellen Teile von `VC01` sind bestanden: WAV, AMBE und DMRD lassen
+sich vollständig und ohne Bitfehler durchlaufen. Die Verständlichkeit des
+Software-Encoders ist für Tests nutzbar, bleibt aber eingeschränkt und wird
+nicht mit der Sprachqualität der Funkgeräte gleichgesetzt.
 
-Für den nächsten Hardwarelauf muss das DMRD-Szenario mit
-OpenDMR `1.0.0+dmroute.1` neu erzeugt werden. Danach folgen drei RT3S-Läufe und
-die entsprechende AnyTone-Prüfung. Gerätefirmware, Hotspot-Firmware und ein
-Paketmitschnitt werden dabei ergänzend erfasst.
+`VC03` und `VC04` sind nicht bestanden. Der Lauf mit dmroute.1 weist den
+korrekten Rufaufbau und ein gleiches Verhalten beider Geräte nach, erfüllt das
+Erfolgskriterium einer klar verständlichen Kennung jedoch nicht.
+
+Beim späteren Hardwarelauf werden die Szenarien mit OpenDMR
+`1.0.0+dmroute.2` neu erzeugt und jeweils dreimal mit RT3S und AnyTone
+wiederholt. Gerätefirmware, Hotspot-Firmware, Paketmitschnitt und subjektive
+Verständlichkeit werden dabei getrennt erfasst.

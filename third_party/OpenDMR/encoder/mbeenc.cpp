@@ -314,7 +314,11 @@ static void encode_ambe(const IMBE_PARAM *imbe_param, int b[], mbe_parms *cur_mp
 		for (int l = 1; l <= L; l++) {
 			int jl = (int)((float)l * 16.0f * AmbeW0table[b[0]]);
 			if (jl > 7) jl = 7;
-			if (imbe_param->v_uv_dsn[l-1] != AmbeVuv[n][jl])
+			/* The analyzer assigns one voiced/unvoiced decision to each
+			 * three-harmonic band. Harmonics above 36 share the final band. */
+			int kl = 12;
+			if (l <= 36) kl = (l + 2) / 3;
+			if (imbe_param->v_uv_dsn[(kl - 1) * 3] != AmbeVuv[n][jl])
 				En += m_float2[l-1];
 		}
 		if (n == 0)
@@ -530,7 +534,7 @@ static void encode_ambe(const IMBE_PARAM *imbe_param, int b[], mbe_parms *cur_mp
  * MBEEncoder implementation
  */
 MBEEncoder::MBEEncoder()
-	: d_gain_adjust(1.0f)
+	: d_gain_adjust(0.0f)
 {
 	mbe_parms enh_mp;
 	mbe_initMbeParms(&cur_mp, &prev_mp, &enh_mp);

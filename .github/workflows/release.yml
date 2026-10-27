@@ -163,7 +163,7 @@ jobs:
           cp third_party/OpenDMR/LICENSE ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-LICENSE
           cp third_party/OpenDMR/decoder/CREDITS ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-decoder-CREDITS
           cp third_party/OpenDMR/encoder/CREDITS ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-encoder-CREDITS
-          tar -czf ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-1.0.0+dmroute.1-source.tar.gz -C third_party OpenDMR
+          tar -czf ./publish/DMRoute-ng-playground-linux-x64/OpenDMR-1.0.0+dmroute.2-source.tar.gz -C third_party OpenDMR
           tar -czf ./publish/DMRoute-ng-playground-linux-x64.tar.gz -C ./publish DMRoute-ng-playground-linux-x64
 
       - name: Add Playground to GitHub Release

@@ -241,7 +241,8 @@ OpenDMR 1.0.0 ist auf Commit
 `d28164b39ba4d91ad5948ff22707937f8944f70f` festgelegt. Lizenz und
 Urheberrechtshinweise stehen in `THIRD-PARTY-NOTICES.md` und unter
 `third_party/OpenDMR/`. DMRoute-ng liefert den Codec als
-`1.0.0+dmroute.1` mit einer lokalen Korrektur der AMBE-Parameterzuordnung aus.
+`1.0.0+dmroute.2` mit lokalen Korrekturen der AMBE-Parameterzuordnung und der
+DMR-Gain-Kalibrierung aus.
 
 Der Codec wird unter macOS und Linux aus einer Arbeitskopie gebaut:
 
