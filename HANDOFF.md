@@ -43,10 +43,11 @@
   `ansage-tg1.wav` erzeugt unter dmroute.2 252 AMBE-Frames und dekodiert sie zu
   40.320 PCM-Samples. Der NativeAOT-Publish des Servers für `osx-arm64` ist
   erfolgreich; `ld` meldet nur die bekannte Abkündigung von `-ld_classic`.
-- Nächster Schritt: PR #28 aktualisieren und später `VC03`/`VC04` mit einem
-  durch dmroute.2 neu erzeugten Szenario auf AnyTone und RT3S wiederholen. Die
-  vier lokalen ungetrackten WAV-/DMRD-Dateien bleiben unverändert und werden
-  nicht committed.
+- Draft-PR #28 enthält diesen Stand und bleibt auf den noch offenen PR #27
+  gestapelt. Nächster fachlicher Schritt ist die spätere Wiederholung von
+  `VC03`/`VC04` mit einem durch dmroute.2 neu erzeugten Szenario auf AnyTone
+  und RT3S. Die vier lokalen ungetrackten WAV-/DMRD-Dateien bleiben unverändert
+  und werden nicht committed.
 
 ## Basis: gestapelter Struktur- und Dokumentations-PR
 
