@@ -28,7 +28,7 @@ extern "C" {
 #define OPENDMR_VERSION_MINOR   0
 #define OPENDMR_VERSION_PATCH   0
 
-static const char *version_string = "1.0.0";
+static const char *version_string = "1.0.0+dmroute.1";
 
 /*
  * ============================================================================
@@ -258,22 +258,11 @@ void opendmr_encoder_set_gain(opendmr_encoder_t *enc, int gain_db)
 /*
  * Encode 49-bit voice parameters to 72-bit AMBE+2 frame.
  *
- * Input: b[9] voice parameters from MBEEncoder
+ * Input: 49 voice bits in AMBE channel order
  * Output: 72-bit frame in DVSI/canonical order
  */
-static void encode_ambe_frame(const int b[9], uint8_t *frame72)
+static void encode_ambe_frame(const uint8_t bits49[49], uint8_t *frame72)
 {
-    /* Pack b[9] into 49 bits */
-    static const int b_lengths[9] = {7, 5, 5, 9, 7, 5, 4, 4, 3};
-    uint8_t bits49[49];
-    int pos = 0;
-    for (int i = 0; i < 9; i++) {
-        int val = b[i];
-        for (int j = b_lengths[i] - 1; j >= 0; j--) {
-            bits49[pos++] = (val >> j) & 1;
-        }
-    }
-
     /* Extract 12-bit values for FEC encoding */
     /* C0 = bits49[0-11], C1 = bits49[12-23], C2 = bits49[24-34], C3 = bits49[35-48] */
     uint32_t c0 = 0, c1 = 0;
@@ -333,12 +322,12 @@ bool opendmr_encode(opendmr_encoder_t *enc,
     if (!enc || !enc->enc || !pcm || !ambe)
         return false;
 
-    /* Encode PCM to voice parameters */
-    int b[9] = {0};
-    enc->enc->encode_dmr_params(pcm, b);
+    /* Encode PCM to voice bits in the channel order expected by the decoder. */
+    uint8_t bits49[49] = {0};
+    enc->enc->encode_dmr_bits(pcm, bits49);
 
     /* Encode voice parameters to 72-bit frame */
-    encode_ambe_frame(b, ambe);
+    encode_ambe_frame(bits49, ambe);
 
     return true;
 }

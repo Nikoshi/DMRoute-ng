@@ -32,6 +32,7 @@ endif
 STATIC_LIB = libopendmr.a
 SHARED_LIB = libopendmr.$(SHARED_EXT)
 TEST_TOOL = dmr_codec
+REGRESSION_TEST = codec_test
 
 # Source files
 OPENDMR_SRCS = opendmr.cpp
@@ -94,6 +95,12 @@ $(SHARED_LIB): $(ALL_OBJS)
 $(TEST_TOOL): dmr_codec.cpp $(STATIC_LIB)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(STATIC_LIB) $(LDFLAGS)
 
+$(REGRESSION_TEST): codec_test.cpp $(STATIC_LIB)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(STATIC_LIB) $(LDFLAGS)
+
+test: $(REGRESSION_TEST)
+	./$(REGRESSION_TEST)
+
 # Compile rules
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
@@ -106,7 +113,7 @@ $(TEST_TOOL): dmr_codec.cpp $(STATIC_LIB)
 
 # Clean
 clean:
-	rm -f $(ALL_OBJS) $(STATIC_LIB) $(SHARED_LIB) $(TEST_TOOL)
+	rm -f $(ALL_OBJS) $(STATIC_LIB) $(SHARED_LIB) $(TEST_TOOL) $(REGRESSION_TEST)
 	rm -f opendmr.o dmr_codec.o
 	rm -f decoder/*.o encoder/*.o
 
@@ -125,4 +132,4 @@ uninstall:
 	rm -f $(PREFIX)/lib/$(SHARED_LIB)
 	rm -f $(PREFIX)/include/opendmr.h
 
-.PHONY: all clean install uninstall
+.PHONY: all test clean install uninstall

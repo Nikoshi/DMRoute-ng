@@ -240,10 +240,10 @@ Produktionspfad und seine NativeAOT-Eigenschaften bleiben dadurch unverändert.
 OpenDMR 1.0.0 ist auf Commit
 `d28164b39ba4d91ad5948ff22707937f8944f70f` festgelegt. Lizenz und
 Urheberrechtshinweise stehen in `THIRD-PARTY-NOTICES.md` und unter
-`third_party/OpenDMR/`.
+`third_party/OpenDMR/`. DMRoute-ng liefert den Codec als
+`1.0.0+dmroute.1` mit einer lokalen Korrektur der AMBE-Parameterzuordnung aus.
 
-Der Codec wird unter macOS und Linux aus einer Arbeitskopie gebaut. Die
-vendorten Quellen bleiben dabei unverändert:
+Der Codec wird unter macOS und Linux aus einer Arbeitskopie gebaut:
 
 [source,shell]
 ----

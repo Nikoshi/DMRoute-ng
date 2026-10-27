@@ -4,9 +4,13 @@
 
 - Branch: `feat/opendmr-playground-voice`, Draft-PR #28, gestapelt auf
   `refactor/application-structure`/PR #27.
-- OpenDMR 1.0.0 ist unverändert unter `third_party/OpenDMR` auf Commit
-  `d28164b39ba4d91ad5948ff22707937f8944f70f` festgelegt. Der Codec läuft als
-  eigener Prozess; der Produktionsserver referenziert `DMRoute_ng.Audio` nicht.
+- OpenDMR basiert auf Version 1.0.0 und Commit
+  `d28164b39ba4d91ad5948ff22707937f8944f70f`. DMRoute-ng kennzeichnet die
+  lokale Encoderkorrektur als `1.0.0+dmroute.1`. Der Codec läuft als eigener
+  Prozess; der Produktionsserver referenziert `DMRoute_ng.Audio` nicht.
+- Der Upstream-Wrapper hatte die neun quantisierten Encoderparameter linear
+  angeordnet. `MBEEncoder` liefert nun die bereits im OP25-Code definierte
+  49-Bit-Kanalzuordnung direkt an die kanonische AMBE-Fehlerkorrektur.
 - `voice encode` erzeugt aus 8-kHz-Mono-PCM-WAV ein reproduzierbares
   `.dmrd`-Szenario für Gruppen- oder Privatrufe. `voice decode` verarbeitet
   rohe AMBE-Dateien oder einen vollständigen unverschlüsselten DMRD-Ruf.
@@ -16,16 +20,25 @@
 - `DmrVoiceBurstCodec` und `DmrVoiceBurstWriter` erzeugen drei kanonische
   AMBE-Frames je Burst, Voice-Sync, Full LC, Embedded LC und Terminatoren ohne
   verwaltete Allokationen im warmgelaufenen Pfad.
-- `make opendmr-codec` baut in `artifacts/opendmr`, damit die vendorten Quellen
-  sauber bleiben. Linux-x64-Test- und Releasepakete enthalten Codec, Lizenz,
-  Credits und vollständiges Quellarchiv; Windows bleibt ohne Codec nutzbar.
-- Der Hardwaretestplan `docs/voice-codec-hardware-plan.adoc` trennt AnyTone und
-  RT3S ausdrücklich. Seine Durchführung ist auf später verschoben.
-- Lokale Prüfung: OpenDMR baut auf macOS ARM64 und meldet Version 1.0.0. Ein
-  480-Sample-WAV wurde über `voice encode` nach DMRD und über `voice decode`
-  zurück nach WAV gewandelt. `make test` besteht mit 136/136 Tests,
-  `make docs` ohne Warnung und der Server-Publish für `osx-arm64` mit
-  `PublishAot=true`.
+- `make opendmr-codec` baut in `artifacts/opendmr`; `make opendmr-test` prüft
+  einen festen kanonischen AMBE-Frame. Linux-x64-Test- und Releasepakete
+  enthalten Codec, Lizenz, Credits und vollständiges Quellarchiv; Windows
+  bleibt ohne Codec nutzbar.
+- Der erste RT3S-Lauf öffnete den Lautsprecher, blieb mit den fehlerhaft
+  angeordneten AMBE-Frames aber unverständlich. Dieselbe Störung trat im
+  lokalen Rundlauf auf. Mit der korrigierten Zuordnung ist die Kontroll-WAV
+  verständlich. `VC04` muss mit einem neu erzeugten Szenario wiederholt werden;
+  der Befund steht in `docs/hardware-test-results-2026-10-26-voice.adoc`.
+- Lokale Prüfung: OpenDMR baut auf macOS ARM64, meldet
+  `1.0.0+dmroute.1` und besteht den neuen nativen Encoder-Regressionsvektor.
+  `make test` besteht mit 136/136 .NET-Tests, `make docs` ohne Warnung. Der
+  Playground kodiert und dekodiert die 4,12-sekündige Testansage als 207
+  AMBE-Frames. Der NativeAOT-Smoke-Publish des Servers für `osx-arm64` ist
+  erfolgreich; `ld` meldet lediglich die bestehende Abkündigung von
+  `-ld_classic`.
+- Nächster Schritt: `ansage.dmrd` mit dem korrigierten Codec neu erzeugen und
+  `VC03`/`VC04` mit AnyTone und RT3S wiederholen. Die lokale ungetrackte
+  `ansage.dmrd` enthält weiterhin die vor der Korrektur erzeugten AMBE-Frames.
 
 ## Basis: gestapelter Struktur- und Dokumentations-PR
 

@@ -1,0 +1,55 @@
+= Hardwareergebnis OpenDMR-Sprache vom 26. Oktober 2026
+:toc:
+:sectnums:
+
+== Anlass
+
+Ein mit dem Playground erzeugter Gruppenruf öffnete den Lautsprecher eines
+Retevis RT3S. Die wiedergegebene Sprache war jedoch nicht verständlich. Da
+Rufaufbau, Ziel-Talkgroup und zeitlicher Ablauf erkennbar funktionierten, wurde
+der Codec-Rundlauf getrennt von der Funkstrecke geprüft.
+
+== Testaufbau
+
+[cols="2,3",options="header"]
+|===
+|Komponente |Wert
+
+|Codec-Host
+|macOS auf ARM64
+
+|Codec
+|OpenDMR 1.0.0 aus Commit
+`d28164b39ba4d91ad5948ff22707937f8944f70f`
+
+|Eingabe
+|4,12 Sekunden PCM-WAV, mono, 8000 Hz, 16 Bit Little Endian
+
+|Funkweg
+|DMRoute-ng-Playground über einen MMDVM-Hotspot zum Retevis RT3S
+|===
+
+== Beobachtung
+
+Der ursprüngliche Codec erzeugte 207 AMBE-Frames. Das erneute Extrahieren aus
+dem DMRD-Szenario und Dekodieren ergab 4,14 Sekunden Audio ohne korrigierte
+Bitfehler. Die lokale Kontroll-WAV enthielt denselben unverständlichen Inhalt
+wie die Funkwiedergabe. Damit lag der Fehler bereits vor der DMR-Verpackung und
+nicht im Funkweg.
+
+Der Encoder hängte die neun quantisierten Sprachparameter linear zu 49 Bit
+zusammen. Die im enthaltenen OP25-Code definierte AMBE-Kanalzuordnung verteilt
+mehrere niederwertige Bits dagegen auf spätere Kanalblöcke. Nach Verwendung
+dieser Zuordnung war der lokale WAV-AMBE-WAV-Rundlauf verständlich und klang
+wie übliche DMR-Sprache.
+
+== Bewertung
+
+`VC01` ist mit der korrigierten Zuordnung lokal bestanden. Der erste Lauf von
+`VC04` belegt nur, dass das RT3S den Ruf öffnet; wegen der fehlerhaft erzeugten
+AMBE-Frames gilt die Sprachprüfung nicht als bestanden.
+
+Für den nächsten Hardwarelauf muss das DMRD-Szenario mit
+OpenDMR `1.0.0+dmroute.1` neu erzeugt werden. Danach folgen drei RT3S-Läufe und
+die entsprechende AnyTone-Prüfung. Gerätefirmware, Hotspot-Firmware und ein
+Paketmitschnitt werden dabei ergänzend erfasst.

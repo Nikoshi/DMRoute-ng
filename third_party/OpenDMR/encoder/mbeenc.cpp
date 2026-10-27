@@ -559,6 +559,13 @@ void MBEEncoder::encode_dmr_params(const int16_t samples[], int b[9])
 	encode_ambe(vocoder.param(), b, &cur_mp, &prev_mp, d_gain_adjust);
 }
 
+void MBEEncoder::encode_dmr_bits(const int16_t samples[], uint8_t bits[49])
+{
+	int b[9] = {0};
+	encode_dmr_params(samples, b);
+	encode_49bit(bits, b);
+}
+
 void MBEEncoder::encode_dmr(const unsigned char* in, unsigned char* out)
 {
 	unsigned int aOrig = 0U;

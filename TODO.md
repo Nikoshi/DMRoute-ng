@@ -14,7 +14,7 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 2 | [#9 Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Golden Vector vorhanden; `DC01` bis `DC04` und `DC10` offen | für `DC10` zwei getrennte RF-Endpunkte |
 | 3 | [#24 Authentifizierte SDS-Sendeschnittstelle](https://github.com/Nikoshi/DMRoute-ng/issues/24) | Sicherheits- und API-Konzept erforderlich | Hardwareabschluss #10 |
 | 4 | [#25 CLI für SDS-Versand](https://github.com/Nikoshi/DMRoute-ng/issues/25) | Planung nach Festlegung der Schnittstelle | #10 und #24 |
-| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | Sprache mit OpenDMR im Playground umgesetzt; Hardwareabnahme `VC03` bis `VC09` offen | funktionierender Hotspot; AnyTone und RT3S |
+| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | OpenDMR-Encoder korrigiert; erneute Hardwareabnahme `VC03` bis `VC09` offen | funktionierender Hotspot; AnyTone und RT3S |
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Resolver, Blind-Probe, WHOIS und Offline-Fallback umgesetzt; Ein-Master-Hardwarelauf teilweise bestanden | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
 | 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit SDS und Control-Transaktionen umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
@@ -110,7 +110,8 @@ Bestätigung sind ebenfalls umgesetzt. Der Playground bietet dafür zusätzlich
 Service-Ziele, Completion, Verlauf und Ctrl+R-Suche.
 Call Alert und Radio Check funktionieren capture-basiert in beide Richtungen,
 einschließlich automatischer Antwort, Retry/Timeout und Ereignis-Inbox.
-Der Playground wandelt mit dem getrennten OpenDMR-1.0.0-Prozess 8-kHz-Mono-WAV
+Der Playground wandelt mit dem getrennten OpenDMR-1.0.0+dmroute.1-Prozess
+8-kHz-Mono-WAV
 in reproduzierbare Gruppen- und Privatsprachszenarien um. Der Rückweg akzeptiert
 rohe AMBE-Dateien oder genau einen vollständigen unverschlüsselten DMRD-Ruf und
 erzeugt WAV. DMR-Interleave, Full LC, Voice-Sync, eingebettete Link Control und
@@ -118,7 +119,11 @@ Terminatoren liegen im gemeinsamen `DMRoute_ng.Protocol`; Prozessadapter und
 WAV-Verarbeitung liegen in `DMRoute_ng.Audio`. Der Produktionsserver bleibt
 vom Codec getrennt.
 
-Open sind die Geräteprüfungen `VC03` bis `VC09` aus
+Ein erster RT3S-Lauf öffnete den Funkruf, blieb wegen einer falschen
+49-Bit-Zuordnung im OpenDMR-Encoder aber unverständlich. Der korrigierte lokale
+Rundlauf ist verständlich; das Ergebnis steht in
+`docs/hardware-test-results-2026-10-26-voice.adoc`. Offen sind die mit einem neu
+erzeugten DMRD-Szenario zu wiederholenden Geräteprüfungen `VC03` bis `VC09` aus
 `docs/voice-codec-hardware-plan.adoc`. Telegram-, Opus- und Live-Audio-Anbindung
 folgen erst nach dieser Abnahme.
 
@@ -188,6 +193,8 @@ geklärt werden. Die semantische Szenario-API aus #15 ist Voraussetzung.
 - Den DMR-ACK-Kompatibilitätspfad der Fallback-SDS erneut mit dem RT3S prüfen
   und eine positive Blind-Probe mit einem Radio-Check-fähigen FuG aus Zone 101
   aufzeichnen.
+- Das Sprachszenario mit OpenDMR `1.0.0+dmroute.1` neu erzeugen und `VC03` sowie
+  `VC04` jeweils dreimal mit AnyTone und RT3S wiederholen.
 
 ## Abgeschlossen
 

@@ -98,13 +98,13 @@ jobs:
         if: matrix.runtime == 'linux-x64'
         shell: bash
         run: |
-          make opendmr-codec
+          make opendmr-test
           cp artifacts/opendmr/dmr_codec ./publish/${{ matrix.artifact }}/
           cp THIRD-PARTY-NOTICES.md ./publish/${{ matrix.artifact }}/
           cp third_party/OpenDMR/LICENSE ./publish/${{ matrix.artifact }}/OpenDMR-LICENSE
           cp third_party/OpenDMR/decoder/CREDITS ./publish/${{ matrix.artifact }}/OpenDMR-decoder-CREDITS
           cp third_party/OpenDMR/encoder/CREDITS ./publish/${{ matrix.artifact }}/OpenDMR-encoder-CREDITS
-          tar -czf ./publish/${{ matrix.artifact }}/OpenDMR-1.0.0-source.tar.gz -C third_party OpenDMR
+          tar -czf ./publish/${{ matrix.artifact }}/OpenDMR-1.0.0+dmroute.1-source.tar.gz -C third_party OpenDMR
 
       - name: Upload playground
         uses: actions/upload-artifact@v4

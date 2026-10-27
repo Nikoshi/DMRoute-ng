@@ -29,3 +29,5 @@ include::hardware-test-results-2026-09-21-sds.adoc[leveloffset=+1]
 include::hardware-test-results-2026-09-21-control.adoc[leveloffset=+1]
 
 include::hardware-test-results-2026-09-21-radio-check-resolver.adoc[leveloffset=+1]
+
+include::hardware-test-results-2026-10-26-voice.adoc[leveloffset=+1]

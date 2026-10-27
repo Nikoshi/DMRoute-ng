@@ -45,6 +45,14 @@ public:
 	void encode_dmr_params(const int16_t samples[], int b[9]);
 
 	/**
+	 * Analyze PCM and return the 49 AMBE voice bits in channel order.
+	 *
+	 * @param samples Input: 160 PCM samples (16-bit signed, 8kHz)
+	 * @param bits    Output: 49 unpacked bits (u0[12] + u1[12] + raw[25])
+	 */
+	void encode_dmr_bits(const int16_t samples[], uint8_t bits[49]);
+
+	/**
 	 * Encode 49-bit voice data to 72-bit DMR frame with FEC.
 	 *
 	 * @param in  Input: 49 bits packed (u0[12] + u1[12] + raw[25])
