@@ -44,6 +44,16 @@ public static class Hamming
         d[14] = d[0] ^ d[1] ^ d[2] ^ d[4] ^ d[6] ^ d[7] ^ d[10];
     }
 
+    public static void Encode16114(Span<bool> d)
+    {
+        if (d.Length < 16) throw new ArgumentException("Hamming (16,11,4) requires 16 bits.", nameof(d));
+        d[11] = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[5] ^ d[7] ^ d[8];
+        d[12] = d[1] ^ d[2] ^ d[3] ^ d[4] ^ d[6] ^ d[8] ^ d[9];
+        d[13] = d[2] ^ d[3] ^ d[4] ^ d[5] ^ d[7] ^ d[9] ^ d[10];
+        d[14] = d[0] ^ d[1] ^ d[2] ^ d[4] ^ d[6] ^ d[7] ^ d[10];
+        d[15] = d[0] ^ d[2] ^ d[5] ^ d[6] ^ d[8] ^ d[9] ^ d[10];
+    }
+
     public static bool Decode1393(Span<bool> d)
     {
         bool c0 = d[0] ^ d[1] ^ d[3] ^ d[5] ^ d[6];

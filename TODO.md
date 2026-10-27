@@ -1,6 +1,6 @@
 # Aufgabenplanung
 
-Stand: 24. Oktober 2026
+Stand: 27. Oktober 2026
 
 Diese Datei fasst die geplanten Arbeiten und ihre Abhängigkeiten zusammen. Die
 GitHub-Issues bleiben die verbindliche Quelle für Anforderungen und Diskussionen.
@@ -14,7 +14,7 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 2 | [#9 Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Golden Vector vorhanden; `DC01` bis `DC04` und `DC10` offen | für `DC10` zwei getrennte RF-Endpunkte |
 | 3 | [#24 Authentifizierte SDS-Sendeschnittstelle](https://github.com/Nikoshi/DMRoute-ng/issues/24) | Sicherheits- und API-Konzept erforderlich | Hardwareabschluss #10 |
 | 4 | [#25 CLI für SDS-Versand](https://github.com/Nikoshi/DMRoute-ng/issues/25) | Planung nach Festlegung der Schnittstelle | #10 und #24 |
-| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | SDS, Call Alert und Radio Check umgesetzt; Sprache offen | #9 und #10 |
+| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | `VC03` mit dmroute.2 technisch bestanden und verständlich, Sprachqualität nur teilweise bestanden; experimenteller Referenzencoder folgt getrennt | RT3S und weitere Hardwarefälle |
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Resolver, Blind-Probe, WHOIS und Offline-Fallback umgesetzt; Ein-Master-Hardwarelauf teilweise bestanden | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
 | 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit SDS und Control-Transaktionen umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
@@ -110,9 +110,37 @@ Bestätigung sind ebenfalls umgesetzt. Der Playground bietet dafür zusätzlich
 Service-Ziele, Completion, Verlauf und Ctrl+R-Suche.
 Call Alert und Radio Check funktionieren capture-basiert in beide Richtungen,
 einschließlich automatischer Antwort, Retry/Timeout und Ereignis-Inbox.
-Semantische Sprache bleibt offen.
-Gemeinsam genutzte Codecs liegen in `DMRoute_ng.Protocol` und bleiben von der
-Serverassembly entkoppelt.
+Der Playground wandelt mit dem getrennten OpenDMR-1.0.0+dmroute.2-Prozess
+8-kHz-Mono-WAV in reproduzierbare Gruppen- und Privatsprachszenarien um. Der Rückweg akzeptiert
+rohe AMBE-Dateien oder genau einen vollständigen unverschlüsselten DMRD-Ruf und
+erzeugt WAV. DMR-Interleave, Full LC, Voice-Sync, eingebettete Link Control und
+Terminatoren liegen im gemeinsamen `DMRoute_ng.Protocol`; Prozessadapter und
+WAV-Verarbeitung liegen in `DMRoute_ng.Audio`. Der Produktionsserver bleibt
+vom Codec getrennt.
+
+Nach der Korrektur der 49-Bit-Zuordnung öffnete ein TG-1-Ruf sowohl AnyTone als
+auch RT3S, blieb auf beiden Geräten aber schwer verständlich. Der lokale
+Rundlauf zeigte dieselbe Einschränkung. OpenDMR `1.0.0+dmroute.2` übernimmt
+deshalb zusätzlich die OP25-DMR-Kalibrierung `gain_adjust = 3.0`; die lokale
+Kontrollansage ist damit besser verständlich, bleibt jedoch hörbar unter der
+Qualität eines Funkgeräte-Encoders. Ein unabhängiger Kreuzvergleich mit einer
+deutschen P.50-Probe, einer DVSI-Ausgabe, baocoder und einem echten
+Baofeng-DM-32-Strom bestätigt die DMR-Packung und den OpenDMR-Decoder. Der
+Qualitätsabstand entsteht bereits im OP25-basierten Encoder-Analysator. Die
+Ergebnisse stehen in
+`docs/hardware-test-results-2026-10-26-voice.adoc`. Offen sind die mit einem
+neu erzeugten Szenario zu wiederholenden Geräteprüfungen `VC03` bis `VC09` aus
+`docs/voice-codec-hardware-plan.adoc`; der Referenzvergleich steht in
+`docs/voice-codec-reference-comparison.adoc`. Vor Telegram-, Opus- und
+Live-Audio-Anbindung müssen Pitch-, Voice/Unvoiced- und Spektralanalyse des
+Encoders verbessert oder durch ein geeigneteres Backend ersetzt werden.
+
+Die dmroute.2-Wiederholung für `VC03` wurde am 27. Oktober dreimal vollständig
+an das AnyTone auf TG 1 gesendet. Anmeldung, Ping, alle 89 Szenarioschritte je
+Durchlauf und Abmeldung waren erfolgreich. Die Ansage war mit bekanntem Inhalt
+durchaus verständlich, könnte qualitativ aber noch besser sein. Rufaufbau und
+Rufende sind bestanden; eine blinde Verständlichkeitsprüfung und der direkte
+A/B-Vergleich mit einem Referenzencoder bleiben offen.
 
 ## 6. Masterinitiierter Radio Check (#21)
 
@@ -152,10 +180,10 @@ Raw-DMRD, spielt Capture-Szenarien ab und zeigt Frames sowie SDS-Inboxen an.
 Profile werden lokal mit restriktiven Dateirechten gespeichert; Linux- und
 Windows-Builds entstehen als CI-Artefakte.
 
-Semantische Befehle für Sprache folgen nach den Writern aus #15. Die
-Control-Befehle sind inzwischen umgesetzt; nach der semantischen
-Sprachunterstützung wird bewertet, ob die REPL genügt oder eine Vollbild-TUI
-echten Mehrwert bietet.
+Semantische Sprachdateien werden außerhalb der REPL mit `voice encode` und
+`voice decode` verarbeitet und anschließend mit `run` abgespielt. Nach der
+Hardwareabnahme wird bewertet, ob die REPL genügt oder eine Vollbild-TUI echten
+Mehrwert bietet.
 
 ## 9. Nix Flake (#23)
 
@@ -180,6 +208,8 @@ geklärt werden. Die semantische Szenario-API aus #15 ist Voraussetzung.
 - Den DMR-ACK-Kompatibilitätspfad der Fallback-SDS erneut mit dem RT3S prüfen
   und eine positive Blind-Probe mit einem Radio-Check-fähigen FuG aus Zone 101
   aufzeichnen.
+- Das Sprachszenario mit OpenDMR `1.0.0+dmroute.2` neu erzeugen und `VC03` sowie
+  `VC04` jeweils dreimal mit AnyTone und RT3S wiederholen.
 
 ## Abgeschlossen
 

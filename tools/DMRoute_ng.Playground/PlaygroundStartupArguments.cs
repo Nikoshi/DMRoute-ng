@@ -1,6 +1,7 @@
 namespace DMRoute_ng.Playground;
 
-internal sealed record PlaygroundStartupArguments(bool Setup, bool Help, string ConfigPath)
+internal sealed record PlaygroundStartupArguments(
+    bool Setup, bool Help, string ConfigPath, string? OpenDmrExecutable, string[] Command)
 {
     public static bool TryParse(string[] args, out PlaygroundStartupArguments parsed, out string? error)
     {
@@ -8,6 +9,7 @@ internal sealed record PlaygroundStartupArguments(bool Setup, bool Help, string 
         var help = false;
         var configPath = PlaygroundConfigurationFile.DefaultPath;
         var configSeen = false;
+        string? openDmrExecutable = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -43,16 +45,36 @@ internal sealed record PlaygroundStartupArguments(bool Setup, bool Help, string 
                 continue;
             }
 
+            if (argument == "--open-dmr")
+            {
+                if (openDmrExecutable is not null || ++index >= args.Length || string.IsNullOrWhiteSpace(args[index]))
+                {
+                    parsed = Empty;
+                    error = "--open-dmr benötigt genau einen Dateipfad.";
+                    return false;
+                }
+                openDmrExecutable = args[index];
+                continue;
+            }
+
+            if (argument.Equals("voice", StringComparison.OrdinalIgnoreCase))
+            {
+                parsed = new PlaygroundStartupArguments(
+                    setup, help, configPath, openDmrExecutable, args[index..]);
+                error = null;
+                return true;
+            }
+
             parsed = Empty;
             error = $"Unbekanntes Argument: {argument}";
             return false;
         }
 
-        parsed = new PlaygroundStartupArguments(setup, help, configPath);
+        parsed = new PlaygroundStartupArguments(setup, help, configPath, openDmrExecutable, []);
         error = null;
         return true;
     }
 
     private static PlaygroundStartupArguments Empty { get; } =
-        new(false, false, PlaygroundConfigurationFile.DefaultPath);
+        new(false, false, PlaygroundConfigurationFile.DefaultPath, null, []);
 }

@@ -4,10 +4,26 @@ EDITOR := rider
 DOC_OUTPUT_DIR ?= artifacts/docs
 DOC_SOURCES := $(shell find docs -type f -name '*.adoc' ! -name 'handbook.adoc' ! -name 'hardware-tests.adoc')
 PLAYGROUND_ARGS ?=
+OPENDMR_BUILD_DIR ?= artifacts/opendmr
 
 include dotnet.mk
 
-.PHONY: docs docs-check docs-html docs-pdf
+.PHONY: docs docs-check docs-html docs-pdf opendmr-codec opendmr-test playground-codec
+
+opendmr-codec:
+	rm -rf $(OPENDMR_BUILD_DIR)
+	mkdir -p $(OPENDMR_BUILD_DIR)/source
+	cp -R third_party/OpenDMR/. $(OPENDMR_BUILD_DIR)/source/
+	$(MAKE) -C $(OPENDMR_BUILD_DIR)/source dmr_codec
+	cp $(OPENDMR_BUILD_DIR)/source/dmr_codec $(OPENDMR_BUILD_DIR)/dmr_codec
+
+opendmr-test: opendmr-codec
+	$(MAKE) -C $(OPENDMR_BUILD_DIR)/source test
+
+test: opendmr-test
+
+playground-codec: opendmr-codec
+	dotnet run --project tools/DMRoute_ng.Playground/DMRoute_ng.Playground.csproj -c $(PROJECT_CONFIG) -- --open-dmr $(OPENDMR_BUILD_DIR)/dmr_codec $(PLAYGROUND_ARGS)
 
 docs: docs-html docs-pdf
 

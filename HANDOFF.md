@@ -1,6 +1,84 @@
 # DMRoute-ng handoff
 
-## Active work: gestapelter Struktur- und Dokumentations-PR
+## Active work: OpenDMR-Sprachszenarien
+
+- Branch: `feat/opendmr-playground-voice`, Draft-PR #28, gestapelt auf
+  `refactor/application-structure`/PR #27.
+- OpenDMR basiert auf Version 1.0.0 und Commit
+  `d28164b39ba4d91ad5948ff22707937f8944f70f`. DMRoute-ng kennzeichnet die
+  lokalen Encoderkorrekturen als `1.0.0+dmroute.2`. Der Codec läuft als eigener
+  Prozess; der Produktionsserver referenziert `DMRoute_ng.Audio` nicht.
+- Der Upstream-Wrapper hatte die neun quantisierten Encoderparameter linear
+  angeordnet. `MBEEncoder` liefert nun die bereits im OP25-Code definierte
+  49-Bit-Kanalzuordnung direkt an die kanonische AMBE-Fehlerkorrektur.
+- Der DMR-Wrapper verwendet nun wie der OP25-Sendepfad den logarithmischen
+  Gain-Offset `3.0`. Erzeugung und Reset verwenden denselben Wert; die
+  öffentliche dB-API rechnet relative Pegeländerungen in den Log2-Offset um.
+  Die V/UV-Suche bildet die Drei-Harmonischen-Bänder des Analysators explizit
+  auf die AMBE-Tabelle ab.
+- `voice encode` erzeugt aus 8-kHz-Mono-PCM-WAV ein reproduzierbares
+  `.dmrd`-Szenario für Gruppen- oder Privatrufe. `voice decode` verarbeitet
+  rohe AMBE-Dateien oder einen vollständigen unverschlüsselten DMRD-Ruf.
+- Explizites `--open-dmr` hat Vorrang vor `Codec:OpenDmrExecutable`, dem
+  Programmverzeichnis und `PATH`. Bestehende Playground-Argumente bleiben
+  gültig; Profile ohne `Codec` werden weiterhin geladen.
+- `DmrVoiceBurstCodec` und `DmrVoiceBurstWriter` erzeugen drei kanonische
+  AMBE-Frames je Burst, Voice-Sync, Full LC, Embedded LC und Terminatoren ohne
+  verwaltete Allokationen im warmgelaufenen Pfad.
+- `make opendmr-codec` baut in `artifacts/opendmr`; `make opendmr-test` prüft
+  einen festen kanonischen AMBE-Frame. Linux-x64-Test- und Releasepakete
+  enthalten Codec, Lizenz, Credits und vollständiges Quellarchiv; Windows
+  bleibt ohne Codec nutzbar.
+- Ein TG-1-Lauf mit dmroute.1 öffnete AnyTone und RT3S, blieb auf beiden
+  Geräten aber schwer verständlich; im Wesentlichen war nur „Sprechgruppe 1“
+  erkennbar. Der lokale Rundlauf klang vergleichbar. Gain 3 verbessert eine
+  langsamere Kontrollansage, einzelne Laute bleiben jedoch verschluckt. Ein
+  zusätzlicher 3,4-kHz-Filter war leicht schlechter und wird nicht verwendet.
+  Der aktualisierte Befund steht in
+  `docs/hardware-test-results-2026-10-26-voice.adoc`.
+- Ein lokaler Referenzvergleich verwendet die deutsche ITU-T-P.50-Probe von
+  DSPINI, deren DVSI-AMBE+2-DMR-Ausgabe, baocoder aus Commit `cef8125` und
+  einen 360 Frames langen Baofeng-DM-32-Strom. Fremde Audiodaten und
+  Capture-Vektoren bleiben wegen Lizenz und Größe außerhalb des Repositories.
+- Die OpenDMR-9-Byte-Schnittstelle führt flache kanonische Codewörter; baocoder
+  führt bereits DMR-interleavte Luftbits. Nach expliziter Konvertierung
+  dekodieren beide Implementierungen den jeweils fremden Strom ohne FEC-Fehler.
+  Die C#-Packung in `DmrVoiceBurstCodec` entspricht dieser Abbildung.
+- Beim echten DM-32-Strom erreicht OpenDMR gegenüber JMBE eine
+  Hüllkurvenkorrelation von 0,964 und eine Spektralkorrelation von 0,839;
+  baocoder erreicht 0,975 und 0,844. Der OpenDMR-Decoder ist damit nicht die
+  Hauptursache der Verständlichkeitsprobleme.
+- Ein OpenDMR-kodierter P.50-Strom erreicht mit OpenDMR 0,552 und mit baocoder
+  0,548 Spektralkorrelation, während die DVSI-Ausgabe 0,821 erreicht. Damit
+  liegt der nächste technische Ansatzpunkt im Encoder-Analysator. Der gesamte
+  Aufbau und die Messgrenzen stehen in
+  `docs/voice-codec-reference-comparison.adoc`.
+- Für `VC03` wurde `ansage-tg1.wav` mit OpenDMR `1.0.0+dmroute.2` neu in ein
+  lokales Szenario mit 252 AMBE-Frames und 89 DMRD-Schritten kodiert. Der
+  Rückweg enthält 40.320 Samples. SHA-256 des Szenarios:
+  `70f9adaa7da3d4c3f3774bc9676d400b6e43788a8a4cbd3301ff0ea62d496bfc`.
+- `hs1` wurde erfolgreich angemeldet und angepingt. Drei TG-1-Aussendungen an
+  das verfügbare AnyTone liefen vollständig durch; anschließend wurde `hs1`
+  regulär abgemeldet. Die Ansage war mit bekanntem Inhalt durchaus
+  verständlich, könnte aber noch besser sein. `VC03` ist für Rufaufbau und
+  Rufende bestanden, für die Sprachqualität ohne Blindprüfung nur teilweise.
+- Die nativen Regressionstests prüfen nun Stille, ein warmgelaufenes
+  synthetisches Sprachsignal, Reset, explizite 0 dB und unterschiedliche
+  Gainwerte. `make test` besteht mit den nativen Tests und 136/136 .NET-Tests;
+  `make docs` läuft ohne Warnung durch. Der Playground-Rundlauf mit
+  `ansage-tg1.wav` erzeugt unter dmroute.2 252 AMBE-Frames und dekodiert sie zu
+  40.320 PCM-Samples. Der NativeAOT-Publish des Servers für `osx-arm64` ist
+  erfolgreich; `ld` meldet nur die bekannte Abkündigung von `-ld_classic`.
+- Draft-PR #28 enthält diesen Stand und bleibt auf den noch offenen PR #27
+  gestapelt. Nächster fachlicher Schritt ist die spätere Wiederholung von
+  `VC04` mit einem durch dmroute.2 neu erzeugten Szenario auf dem RT3S. Ein
+  experimenteller, bitgenauer Referenzencoder wird auf einem getrennten Branch
+  als opt-in Backend vorbereitet und anschließend verdeckt gegen OpenDMR am
+  AnyTone verglichen. Die lokalen WAV-/DMRD-Dateien bleiben unverändert und
+  werden nicht committed. Auch das neue lokale `ansage-tg1-dmroute2.dmrd` wird
+  nicht committed.
+
+## Basis: gestapelter Struktur- und Dokumentations-PR
 
 - Die Arbeit liegt auf `refactor/application-structure` und baut direkt auf
   `feat/issue-10-sds-echo` beziehungsweise Draft-PR #26 auf.
@@ -331,7 +409,7 @@ Nebenläufigkeitsverträge im Code festhalten.
 
 ## Precise next step
 
-Den gestapelten Aufräum-PR nach dem Merge von #26 auf `main` umstellen und zur
-Prüfung freigeben. Funktional folgen weiterhin `DC01` bis `DC09` mit dem
-funktionierenden physischen Hotspot und einem Playground-Hotspot. Nach Reparatur
-des zweiten Hotspots folgen `DC10` sowie RCR06 bis RCR09.
+Die CI-Prüfungen und das Review von Draft-PR #28 abwarten. Nach dem Merge der
+gestapelten Basis #27 den PR auf den dann aktuellen Zielbranch umstellen. Issue
+#15 ist um Implementierung, PR und die weiterhin offenen Hardwarefälle `VC03`
+bis `VC09` ergänzt und bleibt bis zu deren Durchführung geöffnet.

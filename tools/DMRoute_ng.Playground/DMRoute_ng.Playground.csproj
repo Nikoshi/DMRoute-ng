@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DMRoute_ng.Emulator\DMRoute_ng.Emulator.csproj" />
+    <ProjectReference Include="..\..\src\DMRoute_ng.Audio\DMRoute_ng.Audio.csproj" />
   </ItemGroup>
 
   <ItemGroup>

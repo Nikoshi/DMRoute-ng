@@ -33,5 +33,20 @@ warten 2,5 Sekunden auf einen TMS-Zustellbericht, bevor der nächste Versuch
 beginnt. Call Alert und Radio Check verwenden dasselbe Antwortfenster und werden
 von virtuellen Zielgeräten automatisch bestätigt.
 
+Für Sprachszenarien wird OpenDMR als getrenntes Programm gebaut:
+
+```console
+make opendmr-codec
+DMRoute-ng-playground --config dmroute-playground.json \
+  --open-dmr artifacts/opendmr/dmr_codec \
+  voice encode radio1 tg 9 ansage.wav ansage.dmrd
+DMRoute-ng-playground --open-dmr artifacts/opendmr/dmr_codec \
+  voice decode ansage.dmrd kontrolle.wav
+```
+
+Die Eingabe ist einkanaliges PCM-WAV mit 8000 Hz und 16 Bit. Das erzeugte
+Szenario wird anschließend in der REPL mit `run <hotspot> ansage.dmrd`
+abgespielt. Nur vollständige unverschlüsselte Sprachrufe werden dekodiert.
+
 Die vollständige Beschreibung steht in der
 [Emulator-Dokumentation](https://github.com/Nikoshi/DMRoute-ng/blob/main/docs/components/emulator.adoc).
