@@ -96,3 +96,30 @@ Beim späteren Hardwarelauf werden die Szenarien mit OpenDMR
 `1.0.0+dmroute.2` neu erzeugt und jeweils dreimal mit RT3S und AnyTone
 wiederholt. Gerätefirmware, Hotspot-Firmware, Paketmitschnitt und subjektive
 Verständlichkeit werden dabei getrennt erfasst.
+
+== AnyTone-Wiederholung mit dmroute.2
+
+Am 27. Oktober wurde aus derselben Eingabe mit OpenDMR
+`1.0.0+dmroute.2` ein neues TG-1-Szenario erzeugt. Die ältere DMRD-Datei wurde
+nicht wiederverwendet, da sie vor der DMR-Gain-Korrektur entstanden war. Das
+neue Szenario enthält 252 AMBE-Frames in 89 DMRD-Schritten und ergibt lokal
+wieder dekodiert 40.320 PCM-Samples beziehungsweise 5,04 Sekunden.
+
+Die SHA-256-Prüfsumme des lokalen Szenarios lautet
+`70f9adaa7da3d4c3f3774bc9676d400b6e43788a8a4cbd3301ff0ea62d496bfc`.
+Der virtuelle Hotspot `hs1` meldete sich erfolgreich am Master an und
+beantwortete den Ping. Drei getrennte Aussendungen von DMR-ID `10010` an TG 1,
+Zeitschlitz 2, wurden jeweils mit vollständig abgeschlossenem Szenario
+übertragen. Danach wurde der Hotspot regulär abgemeldet.
+
+Das AnyTone gab die Ansage in allen beobachteten Läufen verständlich wieder.
+Die Verständlichkeit war deutlich brauchbarer als bei dmroute.1, könnte aber
+noch besser sein. Da der Inhalt vor dem Test bekannt war, ist dies keine blinde
+Transkriptionsprüfung. `VC03` ist damit für Rufaufbau und Rufende bestanden,
+für die Sprachqualität jedoch nur teilweise bestanden.
+
+Der anschließende unabhängige Vergleich mit einer deutschen P.50-Probe, der
+DVSI-AMBE+2-Ausgabe, baocoder und einem DM-32-Sprachstrom steht in
+`voice-codec-reference-comparison.adoc`. Er bestätigt die DMR-Packung und den
+Decoder, grenzt die verbleibende Qualitätseinschränkung aber auf den
+OpenDMR-Encoder ein.

@@ -14,7 +14,7 @@ Technische Zwischenstände und Übergaben werden in `HANDOFF.md` dokumentiert.
 | 2 | [#9 Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/9) | Golden Vector vorhanden; `DC01` bis `DC04` und `DC10` offen | für `DC10` zwei getrennte RF-Endpunkte |
 | 3 | [#24 Authentifizierte SDS-Sendeschnittstelle](https://github.com/Nikoshi/DMRoute-ng/issues/24) | Sicherheits- und API-Konzept erforderlich | Hardwareabschluss #10 |
 | 4 | [#25 CLI für SDS-Versand](https://github.com/Nikoshi/DMRoute-ng/issues/25) | Planung nach Festlegung der Schnittstelle | #10 und #24 |
-| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | OpenDMR-Packung und DMR-Gain korrigiert; Hardwareabnahme `VC03` bis `VC09` offen | funktionierender Hotspot; AnyTone und RT3S |
+| 5 | [#15 Semantische DMR-Szenarien](https://github.com/Nikoshi/DMRoute-ng/issues/15) | `VC03` mit dmroute.2 technisch bestanden und verständlich, Sprachqualität nur teilweise bestanden; experimenteller Referenzencoder folgt getrennt | RT3S und weitere Hardwarefälle |
 | 6 | [#21 Masterinitiierter Radio Check](https://github.com/Nikoshi/DMRoute-ng/issues/21) | Resolver, Blind-Probe, WHOIS und Offline-Fallback umgesetzt; Ein-Master-Hardwarelauf teilweise bestanden | #9 und #15 |
 | 7 | [#16 Testorchestrator](https://github.com/Nikoshi/DMRoute-ng/issues/16) | Planung erforderlich | #15 |
 | 8 | [#14 Emulator-CLI/TUI](https://github.com/Nikoshi/DMRoute-ng/issues/14) | REPL mit SDS und Control-Transaktionen umgesetzt; TUI optional | weitere Szenario-APIs aus #15 |
@@ -123,11 +123,24 @@ auch RT3S, blieb auf beiden Geräten aber schwer verständlich. Der lokale
 Rundlauf zeigte dieselbe Einschränkung. OpenDMR `1.0.0+dmroute.2` übernimmt
 deshalb zusätzlich die OP25-DMR-Kalibrierung `gain_adjust = 3.0`; die lokale
 Kontrollansage ist damit besser verständlich, bleibt jedoch hörbar unter der
-Qualität eines Funkgeräte-Encoders. Das Ergebnis steht in
+Qualität eines Funkgeräte-Encoders. Ein unabhängiger Kreuzvergleich mit einer
+deutschen P.50-Probe, einer DVSI-Ausgabe, baocoder und einem echten
+Baofeng-DM-32-Strom bestätigt die DMR-Packung und den OpenDMR-Decoder. Der
+Qualitätsabstand entsteht bereits im OP25-basierten Encoder-Analysator. Die
+Ergebnisse stehen in
 `docs/hardware-test-results-2026-10-26-voice.adoc`. Offen sind die mit einem
 neu erzeugten Szenario zu wiederholenden Geräteprüfungen `VC03` bis `VC09` aus
-`docs/voice-codec-hardware-plan.adoc`. Telegram-, Opus- und Live-Audio-Anbindung
-folgen erst nach dieser Abnahme.
+`docs/voice-codec-hardware-plan.adoc`; der Referenzvergleich steht in
+`docs/voice-codec-reference-comparison.adoc`. Vor Telegram-, Opus- und
+Live-Audio-Anbindung müssen Pitch-, Voice/Unvoiced- und Spektralanalyse des
+Encoders verbessert oder durch ein geeigneteres Backend ersetzt werden.
+
+Die dmroute.2-Wiederholung für `VC03` wurde am 27. Oktober dreimal vollständig
+an das AnyTone auf TG 1 gesendet. Anmeldung, Ping, alle 89 Szenarioschritte je
+Durchlauf und Abmeldung waren erfolgreich. Die Ansage war mit bekanntem Inhalt
+durchaus verständlich, könnte qualitativ aber noch besser sein. Rufaufbau und
+Rufende sind bestanden; eine blinde Verständlichkeitsprüfung und der direkte
+A/B-Vergleich mit einem Referenzencoder bleiben offen.
 
 ## 6. Masterinitiierter Radio Check (#21)
 

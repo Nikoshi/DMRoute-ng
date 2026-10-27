@@ -1,0 +1,146 @@
+= AMBE+2-DMR-Referenzvergleich vom 27. Oktober 2026
+:toc:
+:sectnums:
+
+== Ziel
+
+Der lokale und der über Funk wiedergegebene OpenDMR-Rundlauf war nur schwer
+verständlich. Dieser Vergleich trennt Encoder, Decoder und DMR-Bitpackung mit
+unabhängigen Referenzen. Er ersetzt keinen Geräteversuch, grenzt aber ein, an
+welcher Codec-Richtung weitere Arbeit sinnvoll ist.
+
+== Referenzen
+
+[cols="2,5,2",options="header"]
+|===
+|Referenz |Herkunft |SHA-256
+
+|Deutsches Original
+|link:https://dspini.com/files/downloads/speechsamples/P50_short/ger_short.wav[DSPINI,
+ITU-T P.50, 8 kHz PCM]
+|`5120c0333da523dfadd36dcf79334b228796804ae4c20aa373da5898abd3b994`
+
+|DVSI AMBE+2 DMR
+|link:https://dspini.com/files/downloads/speechsamples/AMBE_2400/ger_short.wav[DSPINI,
+AMBE-3000 bei DMR-Datenrate]
+|`cb2a0b473571b8a2c3790ea222f8b4ece16344e50ad69bd23aea290b1fe1cdb3`
+
+|Baofeng-DM-32-Sprachstrom
+|link:https://github.com/tylerwatt12/known-key-mbe-samples/tree/2e15b86e305b7a3c71d52873518e2908747f6e09/dmr_arc4_1[known-key-mbe-samples,
+Commit 2e15b86]
+|verschlüsselter Stream:
+`e1bbc0f1be3df20bafddd797f2e7d1b0b859306ac7a60bf9c6acc809225f97ef`;
+JMBE-WAV:
+`608ff29be48c3698eebf132d64fbec387b2eca98c35d0a1b0aec8bac561c9ad8`
+|===
+
+DSPINI nennt für die deutsche DVSI-Datei einen PESQ-Wert von 2,971. Dieser
+Wert stammt vom Anbieter und wurde hier nicht neu berechnet. Die zugehörige
+link:https://dspini.com/vocoders/lowrate/dmr-lowrate/dmr-ambe-3600[DSPINI-Seite]
+beschreibt den AMBE-3000-Lauf bei 33 Byte/s.
+
+Das Capture-Repository enthält keine Lizenzdatei. Seine Dateien wurden deshalb
+nur lokal ausgewertet und werden nicht in DMRoute-ng übernommen. Das zusätzlich
+geprüfte DVSI-Testvektorarchiv enthält einen 1800-Bit/s-Strom und eignet sich
+nicht als DMR-Referenz.
+
+Als unabhängige Implementierung diente
+link:https://github.com/jasiek/baocoder/tree/cef8125c7b2f3fffeecb8f2162a90d2bb0520ade[baocoder
+aus Commit cef8125]. Der lokale Lauf von `make test && make all` war
+erfolgreich. Die Software steht unter einer ISC-artigen Lizenz; ihre Tabellen
+stammen aus der Firmware eines Baofeng DM-32UV. Sie ist ausschließlich ein
+Diagnosewerkzeug und keine neue Projektabhängigkeit.
+
+== Durchführung
+
+Das 11,113 Sekunden lange P.50-Original wurde auf 555 vollständige
+20-ms-Frames gekürzt. Daraus entstanden folgende Pfade:
+
+* OpenDMR-Encoder nach OpenDMR-Decoder,
+* OpenDMR-Encoder nach baocoder-Decoder,
+* baocoder-Encoder nach baocoder-Decoder,
+* baocoder-Encoder nach OpenDMR-Decoder.
+
+Der DM-32-Strom umfasst 360 Frames beziehungsweise 7,2 Sekunden. Sein
+entschlüsselter 49-Bit-Nutzinhalt wurde mit baocoder und OpenDMR dekodiert und
+jeweils mit der veröffentlichten JMBE-Ausgabe verglichen.
+
+OpenDMR übergibt neun Byte in flacher kanonischer Reihenfolge
+`C0(24)|C1(23)|C2(11)|C3(14)`. Eine DMR-Luftschnittstellen-Datei verteilt diese
+72 Bit dagegen mit `flat[(p / 4) + 18 * (p mod 4)]` auf Luftposition `p`.
+Diese Konvertierung ist beim Kreuztest zwingend. Ohne sie melden Decoder
+scheinbare FEC-Fehler und erzeugen unbrauchbares Audio. Die Abbildung entspricht
+der bereits in `DmrVoiceBurstCodec` verwendeten Packung.
+
+Die Ausgaben wurden in 20-ms-Frames um bis zu 300 ms zeitlich an der
+RMS-Hüllkurve ausgerichtet. Für Frames oberhalb zwei Prozent des maximalen
+Referenzpegels wurden logarithmische Spektralenergien an 16 Punkten von 200 bis
+3200 Hz verglichen. Die Spektralkorrelation bewertet die Form und nicht den
+absoluten Pegel; 1 ist ideal. MBE-Synthese verwendet stochastische Phasen,
+weshalb ein PCM-Vergleich Sample für Sample ungeeignet ist.
+
+== Ergebnisse der P.50-Probe
+
+[cols="3,1,1,1,1,1",options="header"]
+|===
+|Ausgabe |Versatz |Hüllkurve |Spektrum |Spektralfehler |Pegeldifferenz
+
+|DVSI AMBE+2
+|0 ms |0,983 |0,821 |0,664 |-0,13 dB
+
+|OpenDMR -> OpenDMR
+|+60 ms |0,918 |0,552 |1,002 |+4,75 dB
+
+|OpenDMR -> baocoder
+|+60 ms |0,905 |0,548 |0,998 |-1,02 dB
+
+|baocoder -> baocoder
+|+20 ms |0,788 |0,534 |0,977 |+27,93 dB
+
+|baocoder -> OpenDMR
+|+20 ms |0,791 |0,518 |0,994 |+27,71 dB
+|===
+
+Beide Decoder bewerten den OpenDMR-Strom fast gleich. Der deutliche Abstand zur
+DVSI-Referenz entsteht somit bereits beim Kodieren. Die absolute Ausgabelautstärke
+der Decoder unterscheidet sich, ihre spektrale Bewertung des Stroms jedoch kaum.
+
+Der baocoder-Encoder erzeugte aus dieser Probe einen rund 28 dB zu hohen Pegel.
+Beide Decoder zeigen dasselbe Verhalten. Dieser Pfad eignet sich deshalb nicht
+als Qualitätsreferenz für einen Software-Encoder; er bestätigt hier nur die
+gegenseitige Decoder-Kompatibilität.
+
+== Ergebnisse des DM-32-Stroms
+
+[cols="2,1,1,1,1,1",options="header"]
+|===
+|Decoder |Versatz |Hüllkurve |Spektrum |Spektralfehler |Pegeldifferenz
+
+|baocoder
+|0 ms |0,975 |0,844 |0,567 |-15,45 dB
+
+|OpenDMR
+|0 ms |0,964 |0,839 |0,590 |-9,85 dB
+|===
+
+Beide Decoder verarbeiten denselben echten DM-32-Nutzinhalt ohne korrigierte
+Bitfehler. Gegenüber JMBE liegen ihre Hüllkurven- und Spektralwerte eng
+beieinander. Der OpenDMR-Decoder ist damit nicht die Hauptursache der bisher
+schlechten Verständlichkeit.
+
+== Bewertung und Folgerung
+
+Die DMR-Packung ist nach der Interleave-Konvertierung kompatibel. Der
+OpenDMR-Decoder liefert für einen Funkgeräte-Strom ein Ergebnis auf dem Niveau
+des unabhängigen Decoders. Weiteres Abstimmen von Decoderpegel oder
+DMR-Burstpackung verspricht daher keine wesentliche Verbesserung.
+
+Der verbleibende Abstand zur DVSI-Ausgabe liegt im OpenDMR-Encoder. Als nächste
+Codec-Arbeit sind Pitch-Schätzung, Voice/Unvoiced-Erkennung und spektrale
+Quantisierung des OP25-basierten Analysators gegen dieselbe P.50-Probe zu
+untersuchen. Eine Telegram- oder Live-Audio-Anbindung bleibt zurückgestellt,
+bis ein Encoder die Referenzprobe und die Geräteprüfung verständlich wiedergibt.
+
+Die normalisierten Hördateien wurden lokal mit -20 dBFS RMS und höchstens
+-1 dBFS Peak erzeugt. Sie bleiben wegen Herkunft, Größe und Diagnosecharakter
+außerhalb des Repositories.

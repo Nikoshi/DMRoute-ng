@@ -36,6 +36,32 @@
   zusätzlicher 3,4-kHz-Filter war leicht schlechter und wird nicht verwendet.
   Der aktualisierte Befund steht in
   `docs/hardware-test-results-2026-10-26-voice.adoc`.
+- Ein lokaler Referenzvergleich verwendet die deutsche ITU-T-P.50-Probe von
+  DSPINI, deren DVSI-AMBE+2-DMR-Ausgabe, baocoder aus Commit `cef8125` und
+  einen 360 Frames langen Baofeng-DM-32-Strom. Fremde Audiodaten und
+  Capture-Vektoren bleiben wegen Lizenz und Größe außerhalb des Repositories.
+- Die OpenDMR-9-Byte-Schnittstelle führt flache kanonische Codewörter; baocoder
+  führt bereits DMR-interleavte Luftbits. Nach expliziter Konvertierung
+  dekodieren beide Implementierungen den jeweils fremden Strom ohne FEC-Fehler.
+  Die C#-Packung in `DmrVoiceBurstCodec` entspricht dieser Abbildung.
+- Beim echten DM-32-Strom erreicht OpenDMR gegenüber JMBE eine
+  Hüllkurvenkorrelation von 0,964 und eine Spektralkorrelation von 0,839;
+  baocoder erreicht 0,975 und 0,844. Der OpenDMR-Decoder ist damit nicht die
+  Hauptursache der Verständlichkeitsprobleme.
+- Ein OpenDMR-kodierter P.50-Strom erreicht mit OpenDMR 0,552 und mit baocoder
+  0,548 Spektralkorrelation, während die DVSI-Ausgabe 0,821 erreicht. Damit
+  liegt der nächste technische Ansatzpunkt im Encoder-Analysator. Der gesamte
+  Aufbau und die Messgrenzen stehen in
+  `docs/voice-codec-reference-comparison.adoc`.
+- Für `VC03` wurde `ansage-tg1.wav` mit OpenDMR `1.0.0+dmroute.2` neu in ein
+  lokales Szenario mit 252 AMBE-Frames und 89 DMRD-Schritten kodiert. Der
+  Rückweg enthält 40.320 Samples. SHA-256 des Szenarios:
+  `70f9adaa7da3d4c3f3774bc9676d400b6e43788a8a4cbd3301ff0ea62d496bfc`.
+- `hs1` wurde erfolgreich angemeldet und angepingt. Drei TG-1-Aussendungen an
+  das verfügbare AnyTone liefen vollständig durch; anschließend wurde `hs1`
+  regulär abgemeldet. Die Ansage war mit bekanntem Inhalt durchaus
+  verständlich, könnte aber noch besser sein. `VC03` ist für Rufaufbau und
+  Rufende bestanden, für die Sprachqualität ohne Blindprüfung nur teilweise.
 - Die nativen Regressionstests prüfen nun Stille, ein warmgelaufenes
   synthetisches Sprachsignal, Reset, explizite 0 dB und unterschiedliche
   Gainwerte. `make test` besteht mit den nativen Tests und 136/136 .NET-Tests;
@@ -45,9 +71,12 @@
   erfolgreich; `ld` meldet nur die bekannte Abkündigung von `-ld_classic`.
 - Draft-PR #28 enthält diesen Stand und bleibt auf den noch offenen PR #27
   gestapelt. Nächster fachlicher Schritt ist die spätere Wiederholung von
-  `VC03`/`VC04` mit einem durch dmroute.2 neu erzeugten Szenario auf AnyTone
-  und RT3S. Die vier lokalen ungetrackten WAV-/DMRD-Dateien bleiben unverändert
-  und werden nicht committed.
+  `VC04` mit einem durch dmroute.2 neu erzeugten Szenario auf dem RT3S. Ein
+  experimenteller, bitgenauer Referenzencoder wird auf einem getrennten Branch
+  als opt-in Backend vorbereitet und anschließend verdeckt gegen OpenDMR am
+  AnyTone verglichen. Die lokalen WAV-/DMRD-Dateien bleiben unverändert und
+  werden nicht committed. Auch das neue lokale `ansage-tg1-dmroute2.dmrd` wird
+  nicht committed.
 
 ## Basis: gestapelter Struktur- und Dokumentations-PR
 
