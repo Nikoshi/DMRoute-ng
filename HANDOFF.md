@@ -35,10 +35,13 @@
   schreibgeschützten Modus des Playground-Store-Verzeichnisses übernahm. Das
   neue Bundle macht ausschließlich seine eigene Kopie vor den Zusatzdateien
   beschreibbar.
-- Präziser nächster Schritt: Änderungen committen, Branch pushen, Issue #23
-  konkretisieren und einen Draft-PR auf Basis von
-  `feat/blip25-voice-encoder` erstellen. Danach dessen Linux-Job abwarten und
-  eventuelle Nix-Pfad- oder NativeAOT-Abweichungen direkt korrigieren.
+- Der dritte PR-Lauf ist vollständig grün. `nix-release` baute das komplette
+  Linux-x64-Bundle einschließlich NativeAOT, Playground, OpenDMR-Test und PDFs
+  in 71 Sekunden; .NET-Tests, Rust-Encoder, Dokumentation und beide bisherigen
+  Playground-Matrizen bestanden ebenfalls.
+- Draft-PR #30 enthält den Endstand und schließt Issue #23 erst beim Merge.
+  Präziser nächster Schritt ist der Wechsel zurück auf
+  `feat/blip25-voice-encoder` und der verdeckte VC10-A/B-Vergleich auf TG 1.
 
 ## Active work: experimenteller blip25-Encoder
 
